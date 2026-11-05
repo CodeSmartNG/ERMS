@@ -6,8 +6,8 @@ const api = axios.create({ baseURL: BASE_URL, timeout: 20000 });
 
 // ---- token storage ----
 export const tokens = {
-  get access()      { return localStorage.getItem('erms.access'); },
-  get refresh()     { return localStorage.getItem('erms.refresh'); },
+  get access()  { return localStorage.getItem('erms.access'); },
+  get refresh() { return localStorage.getItem('erms.refresh'); },
   set(access, refresh) {
     if (access)  localStorage.setItem('erms.access', access);
     if (refresh) localStorage.setItem('erms.refresh', refresh);
@@ -26,6 +26,8 @@ api.interceptors.request.use((config) => {
 });
 
 // ---- response: refresh on 401 once, then retry ----
+// Single-flight: concurrent 401s share one refresh promise so we never
+// fire multiple /auth/refresh requests for the same expiry window.
 let refreshing = null;
 
 api.interceptors.response.use(
@@ -34,29 +36,40 @@ api.interceptors.response.use(
     const original = error.config;
     const status = error.response?.status;
 
-    if (status !== 401 || original._retried) return Promise.reject(error);
-    if (original.url?.includes('/auth/refresh') || original.url?.includes('/auth/login')) {
+    // Only retry 401s, and only once per request
+    if (status !== 401 || !original || original._retried) {
+      return Promise.reject(error);
+    }
+    // Never try to refresh a refresh/login request — infinite loop guard
+    if (
+      original.url?.includes('/auth/refresh') ||
+      original.url?.includes('/auth/login')
+    ) {
       return Promise.reject(error);
     }
 
     original._retried = true;
 
+    // Start (or reuse) the refresh
     if (!refreshing) {
       refreshing = (async () => {
         const r = tokens.refresh;
-        if (!r) throw new Error('no refresh token');
+        if (!r) throw new Error('No refresh token');
         const res = await axios.post(`${BASE_URL}/auth/refresh`, { refreshToken: r });
         tokens.set(res.data.accessToken, res.data.refreshToken);
         return res.data.accessToken;
-      })().finally(() => { refreshing = null; });
+      })().finally(() => {
+        refreshing = null;
+      });
+    }
 
     try {
       const newAccess = await refreshing;
+      original.headers = original.headers || {};
       original.headers.Authorization = `Bearer ${newAccess}`;
       return api(original);
     } catch {
       tokens.clear();
-      // Send to login — App routes handle the redirect once auth state clears
       window.location.assign('/login');
       return Promise.reject(error);
     }
