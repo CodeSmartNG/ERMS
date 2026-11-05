@@ -9,6 +9,15 @@ const { ROLES } = require('../utils/roleScope');
 const { scopeFilter, assertCanAccess } = require('../middleware/scope');
 const collationService = require('../services/collationService');
 
+// Fire-and-forget collation invalidation. Never throws into the request path.
+function invalidateCollation(result, actorId, context) {
+  collationService
+    .rebuildForResult(result, actorId)
+    .catch((err) => {
+      console.error(`[collation] ${context} invalidation failed:`, err.message);
+    });
+}
+
 // =================================================================
 // SUBMIT (agent only, own PU)
 // =================================================================
@@ -71,23 +80,28 @@ async function submit(req, res) {
 
   // --- validate parties exist & belong to this election's candidates ---
   const partyIds = body.partyVotes.map((p) => p.party);
-  const partyDocs = await models.Party.find({ _id: { $in: partyIds }, isActive: true }).select('code').lean();
+  const partyDocs = await models.Party.find({ _id: { $in: partyIds }, isActive: true })
+    .select('code')
+    .lean();
   if (partyDocs.length !== partyIds.length) {
     throw ApiError.badRequest('One or more parties are unknown or inactive');
   }
   const partyCodeById = new Map(partyDocs.map((p) => [p._id.toString(), p.code]));
 
-  const candidateParties = await models.Candidate
-    .find({ election: body.election, isActive: true })
-    .distinct('party');
+  const candidateParties = await models.Candidate.find({
+    election: body.election,
+    isActive: true,
+  }).distinct('party');
   const validPartySet = new Set(candidateParties.map(String));
   for (const pv of body.partyVotes) {
     if (!validPartySet.has(pv.party)) {
-      throw ApiError.badRequest(`Party ${partyCodeById.get(pv.party)} has no candidate in this election`);
+      throw ApiError.badRequest(
+        `Party ${partyCodeById.get(pv.party)} has no candidate in this election`
+      );
     }
   }
 
-  // --- prepare + upload evidence ---
+  // --- prepare + upload evidence (outside transaction, network-bound) ---
   const { buffer, hash: evidenceHash } = await prepareImage(req.file.buffer);
   const uploaded = await uploadEvidence({
     buffer,
@@ -97,69 +111,80 @@ async function submit(req, res) {
     idempotencyKey: body.idempotencyKey,
   });
 
-  // --- version + previousHash: if a current result exists, this is a revision ---
-  const current = await models.Result.findOne({
-    election: body.election,
-    pollingUnit: body.pollingUnit,
-    isCurrent: true,
-  }).sort({ version: -1 }).lean();
-
-  const version = current ? current.version + 1 : 1;
-  const previousHash = current?.hash || null;
-
-  const resultDoc = new models.Result({
-    election: body.election,
-    pollingUnit: body.pollingUnit,
-    state: geo.state,
-    lga: geo.lga,
-    ward: geo.ward,
-    stateCode: geo.stateCode,
-    lgaCode: geo.lgaCode,
-    wardCode: geo.wardCode,
-    puCode: geo.puCode,
-    path: geo.path,
-
-    registeredVoters: body.registeredVoters,
-    accreditedVoters: body.accreditedVoters,
-    totalVotesCast: body.totalVotesCast,
-    rejectedBallots: body.rejectedBallots || 0,
-    totalValidVotes: sumVotes,
-    partyVotes: body.partyVotes.map((pv) => ({
-      party: pv.party,
-      partyCode: partyCodeById.get(pv.party),
-      votes: pv.votes,
-    })),
-
-    evidence: {
-      photoUrl: uploaded.photoUrl,
-      photoPublicId: uploaded.photoPublicId,
-      photoHash: uploaded.photoHash,
-      capturedAt: body.capturedAt ? new Date(body.capturedAt) : new Date(),
-      gps: body.gps,
-      deviceId: body.deviceId || null,
-    },
-
-    previousHash,
-    hash: '', // computed below
-
-    version,
-    isCurrent: true,
-    supersedes: current?._id || null,
-
-    status: 'SUBMITTED',
-    submittedBy: user._id,
-    submittedAt: new Date(),
-    idempotencyKey: body.idempotencyKey,
-    notes: body.notes || null,
-  });
-
-  resultDoc.hash = computeHash(resultDoc, previousHash);
-
-  // --- transaction: save new doc, mark previous as superseded ---
+  // --- transaction: atomically determine version+previousHash and save ---
+  // The `current` lookup MUST be inside the transaction to avoid a race where
+  // two concurrent revisions compute the same version, then one fails on the
+  // partial unique index {election, pollingUnit, isCurrent:true}.
   const session = await mongoose.startSession();
+  let resultDoc;
+  let wasRevision = false;
+  let previousHash = null;
+  let version = 1;
+
   try {
     await session.withTransaction(async () => {
+      const current = await models.Result.findOne({
+        election: body.election,
+        pollingUnit: body.pollingUnit,
+        isCurrent: true,
+      })
+        .sort({ version: -1 })
+        .session(session)
+        .lean();
+
+      wasRevision = !!current;
+      version = current ? current.version + 1 : 1;
+      previousHash = current?.hash || null;
+
+      resultDoc = new models.Result({
+        election: body.election,
+        pollingUnit: body.pollingUnit,
+        state: geo.state,
+        lga: geo.lga,
+        ward: geo.ward,
+        stateCode: geo.stateCode,
+        lgaCode: geo.lgaCode,
+        wardCode: geo.wardCode,
+        puCode: geo.puCode,
+        path: geo.path,
+
+        registeredVoters: body.registeredVoters,
+        accreditedVoters: body.accreditedVoters,
+        totalVotesCast: body.totalVotesCast,
+        rejectedBallots: body.rejectedBallots || 0,
+        totalValidVotes: sumVotes,
+        partyVotes: body.partyVotes.map((pv) => ({
+          party: pv.party,
+          partyCode: partyCodeById.get(pv.party),
+          votes: pv.votes,
+        })),
+
+        evidence: {
+          photoUrl: uploaded.photoUrl,
+          photoPublicId: uploaded.photoPublicId,
+          photoHash: uploaded.photoHash,
+          capturedAt: body.capturedAt ? new Date(body.capturedAt) : new Date(),
+          gps: body.gps,
+          deviceId: body.deviceId || null,
+        },
+
+        previousHash,
+        hash: '', // computed below
+
+        version,
+        isCurrent: true,
+        supersedes: current?._id || null,
+
+        status: 'SUBMITTED',
+        submittedBy: user._id,
+        submittedAt: new Date(),
+        idempotencyKey: body.idempotencyKey,
+        notes: body.notes || null,
+      });
+
+      resultDoc.hash = computeHash(resultDoc, previousHash);
       await resultDoc.save({ session });
+
       if (current) {
         await models.Result.updateOne(
           { _id: current._id, isCurrent: true },
@@ -175,7 +200,7 @@ async function submit(req, res) {
   await audit.log({
     actor: user._id,
     actorRole: user.role,
-    action: current ? 'RESULT_REVISED' : 'RESULT_SUBMITTED',
+    action: wasRevision ? 'RESULT_REVISED' : 'RESULT_SUBMITTED',
     entity: 'Result',
     entityId: resultDoc._id,
     metadata: {
@@ -194,7 +219,9 @@ async function submit(req, res) {
     role: ROLES.WARD_ADMIN,
     'scope.ward': geo.ward,
     isActive: true,
-  }).select('_id').lean();
+  })
+    .select('_id')
+    .lean();
 
   if (wardAdmin) {
     await models.Notification.create({
@@ -207,11 +234,11 @@ async function submit(req, res) {
       refId: resultDoc._id,
     });
   }
-    // Invalidate collations up the tree so dashboards reflect new submission
-  // counts (even before verification — reportingPercentage moves immediately).
-  collationService.rebuildForResult(resultDoc, user._id).catch((err) => {
-    console.error('[collation] submit invalidation failed:', err.message);
-  });
+
+  // Invalidate collations up the tree so dashboards reflect the new submission
+  // (even before verification — reportingPercentage moves immediately).
+  invalidateCollation(resultDoc, user._id, 'submit');
+
   res.status(201).json({ result: resultDoc.toJSON() });
 }
 
@@ -229,10 +256,8 @@ async function list(req, res) {
   if (q.lgaCode) filter.lgaCode = q.lgaCode;
   if (q.wardCode) filter.wardCode = q.wardCode;
 
-  // Default to current versions only — reviewers rarely want history in list
   filter.isCurrent = true;
 
-  // PU agents only see their own PU (belt + suspenders on top of scopeFilter)
   if (req.user.role === ROLES.POLLING_UNIT_AGENT) {
     filter.pollingUnit = req.user.scope.pollingUnit;
   }
@@ -294,9 +319,11 @@ async function verify(req, res) {
   await result.save();
 
   await audit.log({
-    actor: req.user._id, actorRole: req.user.role,
+    actor: req.user._id,
+    actorRole: req.user.role,
     action: 'RESULT_VERIFIED',
-    entity: 'Result', entityId: result._id,
+    entity: 'Result',
+    entityId: result._id,
     metadata: { election: result.election, puCode: result.puCode },
     req,
   });
@@ -308,9 +335,13 @@ async function verify(req, res) {
     title: 'Your result was verified',
     body: `Result for PU ${result.puCode} was verified`,
     link: `/results/${result._id}`,
-    refModel: 'Result', refId: result._id,
+    refModel: 'Result',
+    refId: result._id,
     severity: 'success',
   });
+
+  // CRITICAL: verification moves votes into the collation tally.
+  invalidateCollation(result, req.user._id, 'verify');
 
   res.json({ result: result.toJSON() });
 }
@@ -327,16 +358,21 @@ async function flag(req, res) {
     throw ApiError.badRequest(`Cannot flag a result in status ${result.status}`);
   }
 
+  const wasVerified = result.status === 'VERIFIED';
+
   result.status = 'FLAGGED';
   result.flagReason = req.body.reason;
   await result.save();
 
   await audit.log({
-    actor: req.user._id, actorRole: req.user.role,
+    actor: req.user._id,
+    actorRole: req.user.role,
     action: 'RESULT_FLAGGED',
-    entity: 'Result', entityId: result._id,
-    metadata: { reason: req.body.reason },
-    req, severity: 'warning',
+    entity: 'Result',
+    entityId: result._id,
+    metadata: { reason: req.body.reason, previousStatus: wasVerified ? 'VERIFIED' : 'SUBMITTED' },
+    req,
+    severity: 'warning',
   });
 
   await models.Notification.create({
@@ -345,9 +381,14 @@ async function flag(req, res) {
     title: 'Your result was flagged',
     body: req.body.reason,
     link: `/results/${result._id}`,
-    refModel: 'Result', refId: result._id,
+    refModel: 'Result',
+    refId: result._id,
     severity: 'warning',
   });
+
+  // CRITICAL when flagging a previously VERIFIED result: its votes must be
+  // removed from the collation tally.
+  invalidateCollation(result, req.user._id, 'flag');
 
   res.json({ result: result.toJSON() });
 }
@@ -364,16 +405,21 @@ async function reject(req, res) {
     throw ApiError.badRequest(`Cannot reject a result in status ${result.status}`);
   }
 
+  const previousStatus = result.status;
+
   result.status = 'REJECTED';
   result.rejectReason = req.body.reason;
   await result.save();
 
   await audit.log({
-    actor: req.user._id, actorRole: req.user.role,
+    actor: req.user._id,
+    actorRole: req.user.role,
     action: 'RESULT_REJECTED',
-    entity: 'Result', entityId: result._id,
-    metadata: { reason: req.body.reason },
-    req, severity: 'warning',
+    entity: 'Result',
+    entityId: result._id,
+    metadata: { reason: req.body.reason, previousStatus },
+    req,
+    severity: 'warning',
   });
 
   await models.Notification.create({
@@ -382,13 +428,14 @@ async function reject(req, res) {
     title: 'Your result was rejected',
     body: req.body.reason,
     link: `/results/${result._id}`,
-    refModel: 'Result', refId: result._id,
+    refModel: 'Result',
+    refId: result._id,
     severity: 'critical',
   });
 
-   collationService.rebuildForResult(result, req.user._id).catch((err) => {
-    console.error('[collation] verification invalidation failed:', err.message);
-  });
+  // If the result was previously VERIFIED, its votes must be removed.
+  invalidateCollation(result, req.user._id, 'reject');
+
   res.json({ result: result.toJSON() });
 }
 
