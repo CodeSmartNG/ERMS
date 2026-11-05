@@ -2,16 +2,80 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/png" href="/favicon.png" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-    <meta name="theme-color" content="#1f6f3c" />
+
+    <!-- Viewport — user-scalable=no is deliberate for PWA UX (prevents
+         double-tap zoom on form inputs). Reconsider only if accessibility
+         becomes a hard requirement for the pilot. -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
+    />
+
     <title>CodeSmartNG ERMS</title>
+    <meta
+      name="description"
+      content="Independent Election Observation — Nigeria. Results Management System for 36 states + FCT, 774 LGAs, and 176,000+ polling units."
+    />
+
+    <!-- Prevent search engines from indexing admin pages (belt-and-suspenders —
+         also enforced per-route via the X-Robots-Tag header in vercel.json) -->
+    <meta name="robots" content="noindex, nofollow" />
+
+    <!-- Browser theme colours -->
+    <meta name="theme-color" content="#1f6f3c" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#0f3a20" media="(prefers-color-scheme: dark)" />
+
+    <!-- iOS PWA -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="ERMS" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+
+    <!-- Android / PWA -->
+    <meta name="mobile-web-app-capable" content="yes" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+
+    <!-- Favicons -->
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16.png" />
+    <link rel="shortcut icon" href="/favicon.ico" />
+
+    <!-- Open Graph — link previews in WhatsApp, Telegram, Twitter, LinkedIn -->
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="CodeSmartNG ERMS" />
+    <meta property="og:description" content="Independent Election Observation — Nigeria" />
+    <meta property="og:image" content="/og-image.png" />
+    <meta property="og:site_name" content="CodeSmartNG ERMS" />
+
+    <!-- Twitter / X -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="CodeSmartNG ERMS" />
+    <meta name="twitter:description" content="Independent Election Observation — Nigeria" />
+    <meta name="twitter:image" content="/og-image.png" />
+
+    <!-- Fonts — display=swap means text renders immediately with a fallback
+         while the custom font loads. Critical on 2G/3G election-day networks. -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap"
+    />
   </head>
+
   <body class="bg-slate-50 text-slate-900 antialiased">
     <div id="root"></div>
+
+    <!-- Fallback for the 0.1% of users with JS disabled -->
+    <noscript>
+      <div style="padding: 2rem; font-family: system-ui, sans-serif; text-align: center;">
+        <h1 style="color: #1f6f3c;">CodeSmartNG ERMS</h1>
+        <p>This application requires JavaScript to run.</p>
+        <p>Please enable JavaScript in your browser settings and reload.</p>
+      </div>
+    </noscript>
+
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>
