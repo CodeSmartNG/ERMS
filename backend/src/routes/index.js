@@ -12,5 +12,6 @@ const collationRoutes = require('./collationRoutes');
 router.use('/incidents', incidentRoutes);
 router.use('/collation', collationRoutes);
 router.use('/collation-admin', require('./collationAdminRoutes'));
+router.use('/elections', require('./electionRoutes'));
 
  module.exports = router;
