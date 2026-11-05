@@ -7,6 +7,7 @@ const { prepareImage, uploadEvidence } = require('../services/evidenceService');
 const { computeHash } = require('../services/resultHashService');
 const { ROLES } = require('../utils/roleScope');
 const { scopeFilter, assertCanAccess } = require('../middleware/scope');
+const collationService = require('../services/collationService');
 
 // =================================================================
 // SUBMIT (agent only, own PU)
@@ -206,7 +207,11 @@ async function submit(req, res) {
       refId: resultDoc._id,
     });
   }
-
+    // Invalidate collations up the tree so dashboards reflect new submission
+  // counts (even before verification — reportingPercentage moves immediately).
+  collationService.rebuildForResult(resultDoc, user._id).catch((err) => {
+    console.error('[collation] submit invalidation failed:', err.message);
+  });
   res.status(201).json({ result: resultDoc.toJSON() });
 }
 
@@ -381,6 +386,9 @@ async function reject(req, res) {
     severity: 'critical',
   });
 
+   collationService.rebuildForResult(result, req.user._id).catch((err) => {
+    console.error('[collation] verification invalidation failed:', err.message);
+  });
   res.json({ result: result.toJSON() });
 }
 
