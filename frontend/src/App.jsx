@@ -12,6 +12,7 @@ import AdminDashboard from './pages/admin/AdminDashboard';
 import ResultsReviewPage from './pages/admin/ResultsReviewPage';
 import IncidentsPage from './pages/admin/IncidentsPage';
 import NotFoundPage from './pages/NotFoundPage';
+import AppShell from './components/AppShell';
 
 function RequireAuth({ roles }) {
   const { isAuthenticated, loading, user } = useAuth();
