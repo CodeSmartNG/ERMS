@@ -124,4 +124,19 @@ const { signAccessToken } = require('../src/utils/tokens');
     body: form, // same key
   });
   const replayJson = await replay.json();
-  console.log('\n🔁 Re
+  console.log('\n🔁 Replay:', replay.status, 'idempotentReplay =', replayJson.idempotentReplay);
+
+  // --- verify as super admin ---
+  const superAdmin = await models.User.findOne({ role: 'NATIONAL_SUPER_ADMIN' });
+  const adminToken = signAccessToken(superAdmin);
+  const verifyRes = await fetch(`${base}/results/${submitJson.result._id}/verify`, {
+    method: 'PATCH',
+    headers: { Authorization: `Bearer ${adminToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ notes: 'OK from smoke test' }),
+  });
+  const verifyJson = await verifyRes.json();
+  console.log('\n✅ Verify:', verifyRes.status, 'status =', verifyJson.result?.status);
+
+  server.close();
+  await mongoose.disconnect();
+})().catch((err) => { console.error(err); process.exit(1); });
