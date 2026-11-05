@@ -1,0 +1,15 @@
+module.exports = {
+  User: require('./User'),
+  State: require('./State'),
+  LGA: require('./LGA'),
+  Ward: require('./Ward'),
+  PollingUnit: require('./PollingUnit'),
+  Election: require('./Election'),
+  Party: require('./Party'),
+  Candidate: require('./Candidate'),
+  Result: require('./Result'),
+  Incident: require('./Incident'),
+  Collation: require('./Collation'),
+  Notification: require('./Notification'),
+  AuditLog: require('./AuditLog'),
+};
