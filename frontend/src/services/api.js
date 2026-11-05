@@ -1,0 +1,99 @@
+import axios from 'axios';
+
+const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+
+const api = axios.create({ baseURL: BASE_URL, timeout: 20000 });
+
+// ---- token storage ----
+export const tokens = {
+  get access()      { return localStorage.getItem('erms.access'); },
+  get refresh()     { return localStorage.getItem('erms.refresh'); },
+  set(access, refresh) {
+    if (access)  localStorage.setItem('erms.access', access);
+    if (refresh) localStorage.setItem('erms.refresh', refresh);
+  },
+  clear() {
+    localStorage.removeItem('erms.access');
+    localStorage.removeItem('erms.refresh');
+  },
+};
+
+// ---- request: attach access token ----
+api.interceptors.request.use((config) => {
+  const t = tokens.access;
+  if (t) config.headers.Authorization = `Bearer ${t}`;
+  return config;
+});
+
+// ---- response: refresh on 401 once, then retry ----
+let refreshing = null;
+
+api.interceptors.response.use(
+  (r) => r,
+  async (error) => {
+    const original = error.config;
+    const status = error.response?.status;
+
+    if (status !== 401 || original._retried) return Promise.reject(error);
+    if (original.url?.includes('/auth/refresh') || original.url?.includes('/auth/login')) {
+      return Promise.reject(error);
+    }
+
+    original._retried = true;
+
+    if (!refreshing) {
+      refreshing = (async () => {
+        const r = tokens.refresh;
+        if (!r) throw new Error('no refresh token');
+        const res = await axios.post(`${BASE_URL}/auth/refresh`, { refreshToken: r });
+        tokens.set(res.data.accessToken, res.data.refreshToken);
+        return res.data.accessToken;
+      })().finally(() => { refreshing = null; });
+
+    try {
+      const newAccess = await refreshing;
+      original.headers.Authorization = `Bearer ${newAccess}`;
+      return api(original);
+    } catch {
+      tokens.clear();
+      // Send to login — App routes handle the redirect once auth state clears
+      window.location.assign('/login');
+      return Promise.reject(error);
+    }
+  }
+);
+
+export default api;
+
+// ---- typed helpers (thin wrappers, used by every screen) ----
+export const authApi = {
+  login: (email, password) => api.post('/auth/login', { email, password }),
+  me: () => api.get('/auth/me'),
+  logout: (refreshToken) => api.post('/auth/logout', { refreshToken }),
+  register: (payload) => api.post('/auth/register', payload),
+};
+
+export const resultsApi = {
+  list: (params) => api.get('/results', { params }),
+  get: (id) => api.get(`/results/${id}`),
+  verify: (id, notes) => api.patch(`/results/${id}/verify`, { notes }),
+  flag: (id, reason) => api.patch(`/results/${id}/flag`, { reason }),
+  reject: (id, reason) => api.patch(`/results/${id}/reject`, { reason }),
+};
+
+export const incidentsApi = {
+  list: (params) => api.get('/incidents', { params }),
+  get: (id) => api.get(`/incidents/${id}`),
+  assign: (id, assignedTo) => api.patch(`/incidents/${id}/assign`, { assignedTo }),
+  updateStatus: (id, status, notes) => api.patch(`/incidents/${id}/status`, { status, notes }),
+};
+
+export const collationApi = {
+  national: (election) => api.get(`/collation/${election}/national`),
+  states: (election) => api.get(`/collation/${election}/states`),
+  state: (election, code) => api.get(`/collation/${election}/state/${code}`),
+  lga: (election, code) => api.get(`/collation/${election}/lga/${code}`),
+  ward: (election, code) => api.get(`/collation/${election}/ward/${code}`),
+  pu: (election, code) => api.get(`/collation/${election}/pu/${code}`),
+  parties: (election, level) => api.get(`/collation/${election}/parties`, { params: { level } }),
+};
