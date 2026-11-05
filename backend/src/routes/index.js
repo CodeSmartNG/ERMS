@@ -2,6 +2,7 @@
  const authRoutes = require('./authRoutes');
  const resultRoutes = require('./resultRoutes');
 const incidentRoutes = require('./incidentRoutes');
+const collationRoutes = require('./collationRoutes');
 
  const router = express.Router();
 
@@ -9,5 +10,6 @@ const incidentRoutes = require('./incidentRoutes');
  router.use('/auth', authRoutes);
  router.use('/results', resultRoutes);
 router.use('/incidents', incidentRoutes);
+router.use('/collation', collationRoutes);
 
  module.exports = router;
