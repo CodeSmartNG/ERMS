@@ -16,4 +16,26 @@ async function resolvePollingUnit(puId) {
     lga:         pu.ancestors.lga,
     ward:        pu.ancestors.ward,
     stateCode:   pu.stateCode,
-    lgaCode:
+    lgaCode:     pu.lgaCode,
+    wardCode:    pu.wardCode,
+    puCode:      pu.code,
+    path:        pu.path,
+    registeredVoters: pu.registeredVoters,
+  };
+}
+
+/**
+ * Builds the path array for any geo level, used by Incident and Collation.
+ *   buildPath({ stateCode: 'KN' })                 => ['KN']
+ *   buildPath({ stateCode:'KN', lgaCode:'KN-01' }) => ['KN','KN-01']
+ */
+function buildPath({ stateCode, lgaCode, wardCode, puCode }) {
+  const p = [];
+  if (stateCode) p.push(stateCode);
+  if (lgaCode)   p.push(lgaCode);
+  if (wardCode)  p.push(wardCode);
+  if (puCode)    p.push(puCode);
+  return p;
+}
+
+module.exports = { resolvePollingUnit, buildPath };
