@@ -1,11 +1,13 @@
  const express = require('express');
  const authRoutes = require('./authRoutes');
-+const resultRoutes = require('./resultRoutes');
+ const resultRoutes = require('./resultRoutes');
+const incidentRoutes = require('./incidentRoutes');
 
  const router = express.Router();
 
  router.get('/health', (_req, res) => res.json({ status: 'ok', ts: new Date().toISOString() }));
  router.use('/auth', authRoutes);
-+router.use('/results', resultRoutes);
+ router.use('/results', resultRoutes);
+router.use('/incidents', incidentRoutes);
 
  module.exports = router;
