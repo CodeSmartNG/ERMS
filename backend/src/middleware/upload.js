@@ -27,7 +27,7 @@ const incidentUpload = multer({
   },
 });
 
-+module.exports = {
+module.exports = {
  uploadEvidence: upload.single('evidence'),
   uploadIncident: incidentUpload.fields([
     { name: 'photos', maxCount: 5 },
