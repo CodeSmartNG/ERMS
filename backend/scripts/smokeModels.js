@@ -1,44 +1,127 @@
+#!/usr/bin/env node
 /* eslint-disable no-console */
 require('dotenv').config();
+const fs = require('fs');
+const path = require('path');
 const mongoose = require('mongoose');
-const models = require('../src/models');
 const env = require('../src/config/env');
+const models = require('../src/models');
+const app = require('../src/app');
+const { signAccessToken } = require('../src/utils/tokens');
 
 (async () => {
   await mongoose.connect(env.MONGODB_URI);
-  console.log('✅ Connected\n');
 
-  // Validate indexes sync (throws on conflicting index definitions)
-  for (const [name, Model] of Object.entries(models)) {
-    await Model.init();
-    const idx = await Model.collection.indexes();
-    console.log(`${name.padEnd(14)} ${String(idx.length).padStart(2)} indexes`);
+  // --- pick a real PU from seeded data ---
+  const pu = await models.PollingUnit.findOne({ isActive: true }).lean();
+  if (!pu) throw new Error('No polling units seeded — run scripts/seedGeo.js first');
+
+  // --- election + parties + candidates ---
+  const state = await models.State.findById(pu.ancestors.state).lean();
+  let election = await models.Election.findOne({ type: 'PRESIDENTIAL' });
+  if (!election) {
+    const admin = await models.User.findOne({ role: 'NATIONAL_SUPER_ADMIN' });
+    election = await models.Election.create({
+      code: 'TEST-2026',
+      title: 'Smoke Test Election',
+      type: 'PRESIDENTIAL',
+      electionDate: new Date(),
+      status: 'ACTIVE',
+      createdBy: admin._id,
+    });
+  } else {
+    await models.Election.updateOne({ _id: election._id }, { $set: { status: 'ACTIVE' } });
   }
 
-  // Sanity: attempt an invalid Result should throw
-  try {
-    await new models.Result({
-      election: new mongoose.Types.ObjectId(),
-      pollingUnit: new mongoose.Types.ObjectId(),
-      state: new mongoose.Types.ObjectId(),
-      lga: new mongoose.Types.ObjectId(),
-      ward: new mongoose.Types.ObjectId(),
-      stateCode: 'KN', lgaCode: 'KN-01', wardCode: 'KN-01-01', puCode: 'PU-001',
-      path: ['KN', 'KN-01', 'KN-01-01', 'PU-001'],
-      registeredVoters: 1000,
-      accreditedVoters: 500,
-      totalVotesCast: 480,
-      rejectedBallots: 20,
-      partyVotes: [{ party: new mongoose.Types.ObjectId(), partyCode: 'APC', votes: 200 }],
-      totalValidVotes: 300, // ← mismatch with partyVotes sum (200)
-      evidence: { photoUrl: 'x', photoPublicId: 'x', photoHash: 'x', capturedAt: new Date() },
-      hash: 'x', idempotencyKey: 'test-1',
-      submittedBy: new mongoose.Types.ObjectId(),
-    }).validate();
-    console.error('❌ Result validation did NOT throw — bug!');
-  } catch (err) {
-    console.log('✅ Result validation correctly rejected:', err.message);
+  const partyCodes = ['APC', 'PDP', 'LP'];
+  const parties = [];
+  for (const code of partyCodes) {
+    let p = await models.Party.findOne({ code });
+    if (!p) p = await models.Party.create({ code, name: `${code} Party`, abbreviation: code });
+    parties.push(p);
+    const exists = await models.Candidate.findOne({ election: election._id, party: p._id });
+    if (!exists) {
+      await models.Candidate.create({
+        election: election._id,
+        party: p._id,
+        firstName: 'Test', lastName: code,
+      });
+    }
   }
 
-  await mongoose.disconnect();
-})().catch((err) => { console.error(err); process.exit(1); });
+  // --- agent user for the PU ---
+  const agentEmail = `agent-${Date.now()}@test.local`;
+  const agent = await models.User.create({
+    email: agentEmail,
+    password: 'TempPass!2026',
+    firstName: 'Smoke',
+    lastName: 'Agent',
+    role: 'POLLING_UNIT_AGENT',
+    scope: {
+      state: pu.ancestors.state,
+      lga: pu.ancestors.lga,
+      ward: pu.ancestors.ward,
+      pollingUnit: pu._id,
+    },
+  });
+  const agentToken = signAccessToken(agent);
+
+  // --- tiny test image ---
+  const imgPath = path.join(__dirname, 'fixture.png');
+  if (!fs.existsSync(imgPath)) {
+    // 1x1 red PNG (base64) — valid image for sharp
+    fs.writeFileSync(
+      imgPath,
+      Buffer.from(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+        'base64'
+      )
+    );
+  }
+
+  // --- spawn server on ephemeral port ---
+  const server = app.listen(0);
+  await new Promise((r) => server.once('listening', r));
+  const { port } = server.address();
+  const base = `http://127.0.0.1:${port}/api`;
+
+  const idempotencyKey = crypto.randomUUID();
+  const form = new FormData();
+  form.append('election', election._id.toString());
+  form.append('pollingUnit', pu._id.toString());
+  form.append('registeredVoters', '1000');
+  form.append('accreditedVoters', '400');
+  form.append('totalVotesCast', '380');
+  form.append('rejectedBallots', '5');
+  form.append('totalValidVotes', '375'); // computed by server, but harmless
+  form.append('partyVotes', JSON.stringify(parties.map((p, i) => ({
+    party: p._id.toString(),
+    votes: [150, 130, 95][i],
+  }))));
+  form.append('idempotencyKey', idempotencyKey);
+  form.append('evidence', new Blob([fs.readFileSync(imgPath)], { type: 'image/png' }), 'evidence.png');
+
+  const submitRes = await fetch(`${base}/results`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${agentToken}` },
+    body: form,
+  });
+  const submitJson = await submitRes.json();
+  console.log('\n📤 Submit:', submitRes.status);
+  console.log(JSON.stringify(submitJson.result ? {
+    _id: submitJson.result._id,
+    version: submitJson.result.version,
+    status: submitJson.result.status,
+    hash: submitJson.result.hash.slice(0, 16) + '…',
+    evidenceHash: submitJson.result.evidence.photoHash.slice(0, 16) + '…',
+    partyVotes: submitJson.result.partyVotes.map((p) => `${p.partyCode}=${p.votes}`),
+  } : submitJson, null, 2));
+
+  // --- idempotent replay ---
+  const replay = await fetch(`${base}/results`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${agentToken}` },
+    body: form, // same key
+  });
+  const replayJson = await replay.json();
+  console.log('\n🔁 Re
