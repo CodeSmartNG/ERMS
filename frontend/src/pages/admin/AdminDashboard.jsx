@@ -175,7 +175,7 @@ export default function AdminDashboard() {
                           </td>
                           <td className="px-4 py-3 text-right">
                             <Link
-                              to={`/admin/dashboard/state/${s.stateCode}`}
+                              to={`/admin/dashboard/state/${s.stateCode}?election=${electionId}`}
                               className="text-slate-400 hover:text-brand-600"
                             >
                               <ChevronRight className="h-4 w-4" />
