@@ -10,29 +10,27 @@ const ctrl = require('../controllers/electionController');
 const router = express.Router();
 router.use(requireAuth);
 
-// 1. List elections
+// List elections
 router.get('/', asyncHandler(ctrl.list));
 
-// 2. THIS IS THE MISSING LINE: Get parties for an election
+// Get parties for a specific election (This must be here!)
 router.get('/:id/parties', asyncHandler(ctrl.parties));
 
-// 3. Create election
-const createSchema = z.object({
-  code: z.string().min(2).max(20),
-  title: z.string().min(5).max(200),
-  type: z.enum(ELECTION_TYPES),
-  electionDate: z.string().datetime(),
-  status: z.enum(ELECTION_STATUSES).optional(),
-});
-
+// Create election
 router.post(
   '/',
   requireRole(ROLES.NATIONAL_SUPER_ADMIN),
-  validate(createSchema),
+  validate(z.object({
+    code: z.string().min(2).max(20),
+    title: z.string().min(5).max(200),
+    type: z.enum(ELECTION_TYPES),
+    electionDate: z.string().datetime(),
+    status: z.enum(ELECTION_STATUSES).optional(),
+  })),
   asyncHandler(ctrl.create)
 );
 
-// 4. Update status
+// Update status
 router.patch(
   '/:id/status',
   requireRole(ROLES.NATIONAL_SUPER_ADMIN),
