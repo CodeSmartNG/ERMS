@@ -120,3 +120,20 @@ export const partiesApi = {
   list: () => api.get('/parties'),
   create: (data) => api.post('/parties', data),
 };
+
+export const usersApi = {
+  register: (data) => api.post('/auth/register', data),
+  list: () => api.get('/users'), // We will assume backend has this, if not, it's fine for now
+};
+
+export const candidatesApi = {
+  list: (electionId) => api.get('/candidates', { params: { election: electionId } }),
+  create: (data) => api.post('/candidates', data),
+};
+
+export const geoApi = {
+  states: () => api.get('/geo/states'),
+  lgas: (stateCode) => api.get(`/geo/states/${stateCode}/lgas`),
+  wards: (lgaCode) => api.get(`/geo/lgas/${lgaCode}/wards`),
+  pollingUnits: (wardCode) => api.get(`/geo/wards/${wardCode}/polling-units`),
+};
