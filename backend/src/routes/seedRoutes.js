@@ -1,7 +1,7 @@
 const express = require('express');
 const fs = require('fs');
 const https = require('https');
-const { exec } = require('child_process');
+const { spawn } = require('child_process');
 const path = require('path');
 
 const router = express.Router();
@@ -20,21 +20,27 @@ router.get('/', (req, res) => {
   const file = fs.createWriteStream(csvPath);
   
   // Download the CSV using built-in Node.js HTTPS
-  https.get('https://raw.githubusercontent.com/Emeka-Onwuepe/Polling_Units_in_Nigeria/main/Nigeria_polling_units.csv', (response) => {
+  https.get('https://raw.githubusercontent.com/EmekaOnwuepe/Polling_Units_in_Nigeria/main/Nigeria_polling_units.csv', (response) => {
     response.pipe(file);
     
     file.on('finish', () => {
       file.close();
       console.log('✅ CSV Downloaded successfully. Starting seed script...');
       
-      // Execute the seed script
-      exec('node scripts/seedGeo.js', (error, stdout, stderr) => {
-        if (error) {
-          console.error(`❌ Seed error: ${error.message}`);
-          return;
-        }
-        if (stderr) console.error(`⚠️ Seed stderr: ${stderr}`);
-        console.log(`✅ Seed complete:\n${stdout}`);
+      // Use spawn instead of exec to stream logs in real-time
+      // Notice there is NO --limit here, this will run the full 176k rows
+      const seedProcess = spawn('node', ['scripts/seedGeo.js']);
+
+      seedProcess.stdout.on('data', (data) => {
+        console.log(`[Seed]: ${data.toString().trim()}`);
+      });
+
+      seedProcess.stderr.on('data', (data) => {
+        console.error(`[Seed Error]: ${data.toString().trim()}`);
+      });
+
+      seedProcess.on('close', (code) => {
+        console.log(`✅ Seed process exited with code ${code}`);
       });
     });
   }).on('error', (err) => {
