@@ -16,11 +16,11 @@ export default function UsersPage() {
 
   const [busy, setBusy] = useState(false);
 
-  // Geo Data
-  const statesApi = useApi(() => geoApi.states().then(r => r.data.states), [], { initial: [] });
-  const lgasApi = useApi(() => stateCode ? geoApi.lgas(stateCode).then(r => r.data.lgas) : Promise.resolve([]), [stateCode], { initial: [] });
-  const wardsApi = useApi(() => lgaCode ? geoApi.wards(lgaCode).then(r => r.data.wards) : Promise.resolve([]), [lgaCode], { initial: [] });
-  const pusApi = useApi(() => wardCode ? geoApi.pollingUnits(wardCode).then(r => r.data.pollingUnits) : Promise.resolve([]), [wardCode], { initial: [] });
+  // Geo Data (we don't need .then(r => r.data) here anymore)
+  const statesApi = useApi(() => geoApi.states(), [], { initial: [] });
+  const lgasApi = useApi(() => stateCode ? geoApi.lgas(stateCode) : Promise.resolve([]), [stateCode], { initial: [] });
+  const wardsApi = useApi(() => lgaCode ? geoApi.wards(lgaCode) : Promise.resolve([]), [lgaCode], { initial: [] });
+  const pusApi = useApi(() => wardCode ? geoApi.pollingUnits(wardCode) : Promise.resolve([]), [wardCode], { initial: [] });
 
   // Reset lower dropdowns when parent changes
   useEffect(() => { setLgaCode(''); setWardCode(''); setPuId(''); }, [stateCode]);
@@ -29,9 +29,14 @@ export default function UsersPage() {
 
   async function handleCreate(e) {
     e.preventDefault();
+    if (!puId) {
+      toast.error("Please select a Polling Unit");
+      return;
+    }
     setBusy(true);
     try {
       // We need the actual ObjectIds to send to the backend
+      // Since the arrays are now just the lists, we find the IDs here:
       const stateId = statesApi.data.find(s => s.code === stateCode)?._id;
       const lgaId = lgasApi.data.find(l => l.code === lgaCode)?._id;
       const wardId = wardsApi.data.find(w => w.code === wardCode)?._id;
