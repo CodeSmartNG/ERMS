@@ -10,8 +10,11 @@ const ctrl = require('../controllers/electionController');
 const router = express.Router();
 router.use(requireAuth);
 
-// Anyone authenticated can list
+// Anyone authenticated can list elections
 router.get('/', asyncHandler(ctrl.list));
+
+// THIS IS THE MISSING ROUTE: Get parties for a specific election
+router.get('/:id/parties', asyncHandler(ctrl.parties));
 
 // Only Super Admin can create/update
 const createSchema = z.object({
