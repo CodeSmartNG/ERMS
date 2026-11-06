@@ -8,6 +8,7 @@ const collationAdminRoutes = require('./collationAdminRoutes');
 const electionRoutes = require('./electionRoutes');
 const notificationRoutes = require('./notificationRoutes');
 const geoRoutes = require('./geoRoutes');
+const partyRoutes = require('./partyRoutes');
 
 const router = express.Router();
 
@@ -23,5 +24,6 @@ router.use('/collation-admin', collationAdminRoutes);
 router.use('/elections', electionRoutes);
 router.use('/notifications', notificationRoutes);
 router.use('/geo', geoRoutes);
+router.use('/parties', partyRoutes);
 
 module.exports = router;
