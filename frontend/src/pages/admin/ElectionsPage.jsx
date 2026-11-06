@@ -39,7 +39,6 @@ export default function ElectionsPage() {
   }
 
   async function handleStatus(id, status) {
-    if (!confirm(`Change status to ${status}?`)) return;
     try {
       await electionsApi.updateStatus(id, status);
       toast.success(`Election is now ${status}`);
@@ -91,25 +90,28 @@ export default function ElectionsPage() {
 
       <div className="space-y-3">
         {listApi.data.map((el) => (
-          <div key={el._id} className="card flex items-center justify-between p-4">
+          <div key={el._id} className="card flex flex-col sm:flex-row sm:items-center justify-between p-4 gap-4">
             <div>
               <div className="flex items-center gap-2">
                 <span className="font-semibold text-slate-900">{el.title}</span>
-                <span className={STATUS_BADGE[el.status]}>{el.status}</span>
+                <span className={`badge ${STATUS_BADGE[el.status] || 'badge-neutral'}`}>{el.status}</span>
               </div>
               <p className="mt-1 text-xs text-slate-500">{el.code} · {new Date(el.electionDate).toDateString()}</p>
             </div>
-            <div className="flex gap-2">
-              {el.status === 'DRAFT' && (
-                <button onClick={() => handleStatus(el._id, 'ACTIVE')} className="btn-secondary text-xs">
-                  <CheckCircle2 className="h-3.5 w-3.5" /> Activate
-                </button>
-              )}
-              {el.status === 'ACTIVE' && (
-                <button onClick={() => handleStatus(el._id, 'COLLATING')} className="btn-secondary text-xs">
-                  Start Collation
-                </button>
-              )}
+            
+            {/* New Dropdown to change status freely */}
+            <div className="flex items-center gap-2">
+              <label className="text-xs font-medium text-slate-500">Status:</label>
+              <select 
+                className="input py-1.5 text-sm max-w-[150px]"
+                value={el.status}
+                onChange={(e) => handleStatus(el._id, e.target.value)}
+              >
+                <option value="DRAFT">DRAFT</option>
+                <option value="ACTIVE">ACTIVE</option>
+                <option value="COLLATING">COLLATING</option>
+                <option value="PUBLISHED">PUBLISHED</option>
+              </select>
             </div>
           </div>
         ))}
