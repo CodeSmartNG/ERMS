@@ -183,15 +183,18 @@ async function submit(req, res) {
       });
 
       resultDoc.hash = computeHash(resultDoc, previousHash);
-      await resultDoc.save({ session });
 
-      if (current) {
-        await models.Result.updateOne(
-          { _id: current._id, isCurrent: true },
-          { $set: { isCurrent: false, supersededBy: resultDoc._id, status: 'SUPERSEDED' } },
-          { session }
-        );
-      }
+if (current) {
+  // 1. Hide the old result FIRST
+  await models.Result.updateOne(
+    { _id: current._id, isCurrent: true },
+    { $set: { isCurrent: false, supersededBy: resultDoc._id, status: 'SUPERSEDED' } },
+    { session }
+  );
+}
+
+// 2. Then save the new result
+await resultDoc.save({ session });
     });
   } finally {
     await session.endSession();
