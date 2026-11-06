@@ -1,8 +1,12 @@
-const api = axios.create({ baseURL: BASE_URL, timeout: 60000 });
+import axios from 'axios';
 
 const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
 
-const api = axios.create({ baseURL: BASE_URL, timeout: 20000 });
+// Create a single instance of axios with a 60-second timeout (for Render cold starts)
+const api = axios.create({ 
+  baseURL: BASE_URL, 
+  timeout: 60000 
+});
 
 // ---- token storage ----
 export const tokens = {
@@ -26,8 +30,6 @@ api.interceptors.request.use((config) => {
 });
 
 // ---- response: refresh on 401 once, then retry ----
-// Single-flight: concurrent 401s share one refresh promise so we never
-// fire multiple /auth/refresh requests for the same expiry window.
 let refreshing = null;
 
 api.interceptors.response.use(
@@ -36,11 +38,9 @@ api.interceptors.response.use(
     const original = error.config;
     const status = error.response?.status;
 
-    // Only retry 401s, and only once per request
     if (status !== 401 || !original || original._retried) {
       return Promise.reject(error);
     }
-    // Never try to refresh a refresh/login request — infinite loop guard
     if (
       original.url?.includes('/auth/refresh') ||
       original.url?.includes('/auth/login')
@@ -50,7 +50,6 @@ api.interceptors.response.use(
 
     original._retried = true;
 
-    // Start (or reuse) the refresh
     if (!refreshing) {
       refreshing = (async () => {
         const r = tokens.refresh;
@@ -78,7 +77,7 @@ api.interceptors.response.use(
 
 export default api;
 
-// ---- typed helpers (thin wrappers, used by every screen) ----
+// ---- typed helpers ----
 export const authApi = {
   login: (email, password) => api.post('/auth/login', { email, password }),
   me: () => api.get('/auth/me'),
