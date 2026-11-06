@@ -4,8 +4,8 @@ import { useAuth } from './context/AuthContext';
 import { HOME_BY_ROLE, ROLES } from './utils/roles';
 import LoadingScreen from './components/LoadingScreen';
 import AppShell from './components/AppShell';
+import CandidatesPage from './pages/admin/CandidatesPage';
 
-import LoginPage from './pages/auth/LoginPage';
 
 // Agent
 import AgentHome from './pages/agent/AgentHome';
@@ -22,6 +22,8 @@ import ResultsReviewPage from './pages/admin/ResultsReviewPage';
 import IncidentsPage from './pages/admin/IncidentsPage';
 import ElectionsPage from './pages/admin/ElectionsPage';
 import PartiesPage from './pages/admin/PartiesPage';
+import UsersPage from './pages/admin/UsersPage';
+import LoginPage from './pages/auth/LoginPage';
 
 import NotFoundPage from './pages/NotFoundPage';
 
@@ -99,6 +101,8 @@ export default function App() {
             {/* --- NEW ROUTES --- */}
             <Route path="/admin/elections" element={<ElectionsPage />} />
             <Route path="/admin/parties" element={<PartiesPage />} />
+            <Route path="/admin/candidates" element={<CandidatesPage />} />
+            <Route path="/admin/users" element={<UsersPage />} />
           </Route>
         </Route>
 
