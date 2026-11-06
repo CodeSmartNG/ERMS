@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { NavLink, useNavigate, Outlet, Link } from 'react-router-dom';
-import { LayoutDashboard, ClipboardCheck, AlertTriangle, Bell, LogOut, Menu, X, Vote, Flag } from 'lucide-react';
+import { LayoutDashboard, ClipboardCheck, AlertTriangle, Bell, LogOut, Menu, X, Vote, Flag, UserPlus, Users } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { ROLE_LABELS } from '@/utils/roles';
 import { notificationsApi } from '@/services/notifications';
@@ -11,6 +11,8 @@ const NAV = [
   { to: '/admin/incidents', label: 'Incidents', icon: AlertTriangle },
   { to: '/admin/elections', label: 'Elections', icon: Vote },
   { to: '/admin/parties', label: 'Parties', icon: Flag },
+  { to: '/admin/candidates', label: 'Candidates', icon: Users },
+  { to: '/admin/users', label: 'Create Agent', icon: UserPlus },
 ];
 
 export default function AppShell() {
