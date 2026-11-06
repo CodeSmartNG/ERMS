@@ -123,7 +123,7 @@ export const partiesApi = {
 
 export const usersApi = {
   register: (data) => api.post('/auth/register', data),
-  list: () => api.get('/users'), // We will assume backend has this, if not, it's fine for now
+  list: () => api.get('/users'), 
 };
 
 export const candidatesApi = {
@@ -131,9 +131,11 @@ export const candidatesApi = {
   create: (data) => api.post('/candidates', data),
 };
 
+// ---- UPDATED GEO API ----
+// Notice we added `.then(r => r.data.xxx)` so the page receives a clean array.
 export const geoApi = {
-  states: () => api.get('/geo/states'),
-  lgas: (stateCode) => api.get(`/geo/states/${stateCode}/lgas`),
-  wards: (lgaCode) => api.get(`/geo/lgas/${lgaCode}/wards`),
-  pollingUnits: (wardCode) => api.get(`/geo/wards/${wardCode}/polling-units`),
+  states: () => api.get('/geo/states').then(r => r.data.states),
+  lgas: (stateCode) => api.get(`/geo/states/${stateCode}/lgas`).then(r => r.data.lgas),
+  wards: (lgaCode) => api.get(`/geo/lgas/${lgaCode}/wards`).then(r => r.data.wards),
+  pollingUnits: (wardCode) => api.get(`/geo/wards/${wardCode}/polling-units`).then(r => r.data.pollingUnits),
 };
