@@ -10,13 +10,13 @@ const ctrl = require('../controllers/electionController');
 const router = express.Router();
 router.use(requireAuth);
 
-// Anyone authenticated can list elections
+// 1. List elections
 router.get('/', asyncHandler(ctrl.list));
 
-// THIS IS THE MISSING ROUTE: Get parties for a specific election
+// 2. THIS IS THE MISSING LINE: Get parties for an election
 router.get('/:id/parties', asyncHandler(ctrl.parties));
 
-// Only Super Admin can create/update
+// 3. Create election
 const createSchema = z.object({
   code: z.string().min(2).max(20),
   title: z.string().min(5).max(200),
@@ -32,6 +32,7 @@ router.post(
   asyncHandler(ctrl.create)
 );
 
+// 4. Update status
 router.patch(
   '/:id/status',
   requireRole(ROLES.NATIONAL_SUPER_ADMIN),
