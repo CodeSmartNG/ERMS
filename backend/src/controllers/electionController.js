@@ -1,5 +1,6 @@
 const models = require('../models');
 const ApiError = require('../utils/ApiError');
+const audit = require('../services/auditService');
 const { ELECTION_STATUSES } = require('../models/Election');
 
 // =================================================================
@@ -8,7 +9,6 @@ const { ELECTION_STATUSES } = require('../models/Election');
 async function list(req, res) {
   const { status, type, page = 1, limit = 50 } = req.query;
 
-  // ---- validate query params ----
   if (status && !ELECTION_STATUSES.includes(status)) {
     throw ApiError.badRequest(
       `status must be one of: ${ELECTION_STATUSES.join(', ')}`
@@ -20,9 +20,6 @@ async function list(req, res) {
   if (status) filter.status = status;
   if (type) filter.type = type;
 
-  // ---- scope: non-super-admins only see elections active in their state ----
-  // PU agents additionally only see ACTIVE elections (they can't submit to
-  // UPCOMING / COLLATING / PUBLISHED).
   const user = req.user;
   const userStateId = user.scope?.state || null;
 
@@ -30,18 +27,16 @@ async function list(req, res) {
     if (!filter.status) filter.status = 'ACTIVE';
     if (userStateId) {
       filter.$or = [
-        { states: { $size: 0 } },              // national elections (presidential)
-        { states: { $in: [userStateId] } },    // state-scoped elections
+        { states: { $size: 0 } },
+        { states: { $in: [userStateId] } },
       ];
     }
   } else if (userStateId) {
-    // State/LGA/Ward admins — see elections relevant to their state
     filter.$or = [
       { states: { $size: 0 } },
       { states: { $in: [userStateId] } },
     ];
   }
-  // NATIONAL_SUPER_ADMIN / OBSERVER: no state filter — see everything
 
   const skip = (Math.max(1, parseInt(page, 10)) - 1) * Math.min(200, Math.max(1, parseInt(limit, 10)));
   const take = Math.min(200, Math.max(1, parseInt(limit, 10)));
@@ -69,9 +64,6 @@ async function list(req, res) {
 
 // =================================================================
 // GET PARTIES FOR AN ELECTION
-// Returns only parties that have an active candidate in this election,
-// so the frontend can render the party-vote grid without loading the
-// full party collection.
 // =================================================================
 async function parties(req, res) {
   const election = await models.Election.findById(req.params.id)
@@ -79,10 +71,6 @@ async function parties(req, res) {
     .lean();
   if (!election) throw ApiError.notFound('Election not found');
 
-  // Scope check: non-super-admins can only load parties for elections in
-  // their state (or national elections). This is the same rule applied in
-  // the submit endpoint's eligibility check, so the frontend can't render
-  // a party grid the backend will reject on submit.
   const user = req.user;
   if (user.scope?.state && election.states.length > 0) {
     const allowed = election.states.some((s) => s.equals(user.scope.state));
@@ -104,4 +92,56 @@ async function parties(req, res) {
   res.json({ parties });
 }
 
-module.exports = { list, parties };
+// =================================================================
+// CREATE ELECTION (Super Admin only)
+// =================================================================
+async function create(req, res) {
+  const { code, title, type, electionDate, status, states } = req.body;
+
+  const existing = await models.Election.findOne({ code: code.toUpperCase() });
+  if (existing) throw ApiError.conflict('Election code already exists');
+
+  const election = await models.Election.create({
+    code: code.toUpperCase(),
+    title,
+    type,
+    electionDate: new Date(electionDate),
+    status: status || 'DRAFT',
+    states: states || [],
+    createdBy: req.user._id,
+  });
+
+  await audit.log({
+    actor: req.user._id, actorRole: req.user.role,
+    action: 'ELECTION_CREATED',
+    entity: 'Election', entityId: election._id,
+    metadata: { code, title }, req,
+  });
+
+  res.status(201).json({ election });
+}
+
+// =================================================================
+// UPDATE STATUS (Super Admin only)
+// =================================================================
+async function updateStatus(req, res) {
+  const { status } = req.body;
+  if (!ELECTION_STATUSES.includes(status)) throw ApiError.badRequest('Invalid status');
+
+  const election = await models.Election.findById(req.params.id);
+  if (!election) throw ApiError.notFound('Election not found');
+
+  election.status = status;
+  await election.save();
+
+  await audit.log({
+    actor: req.user._id, actorRole: req.user.role,
+    action: 'ELECTION_STATUS_CHANGED',
+    entity: 'Election', entityId: election._id,
+    metadata: { status }, req,
+  });
+
+  res.json({ election });
+}
+
+module.exports = { list, parties, create, updateStatus };
