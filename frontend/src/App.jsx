@@ -20,6 +20,8 @@ import DashboardLGA from './pages/admin/DashboardLGA';
 import DashboardWard from './pages/admin/DashboardWard';
 import ResultsReviewPage from './pages/admin/ResultsReviewPage';
 import IncidentsPage from './pages/admin/IncidentsPage';
+import ElectionsPage from './pages/admin/ElectionsPage';
+import PartiesPage from './pages/admin/PartiesPage';
 
 import NotFoundPage from './pages/NotFoundPage';
 
@@ -93,6 +95,10 @@ export default function App() {
 
             <Route path="/admin/results" element={<ResultsReviewPage />} />
             <Route path="/admin/incidents" element={<IncidentsPage />} />
+            
+            {/* --- NEW ROUTES --- */}
+            <Route path="/admin/elections" element={<ElectionsPage />} />
+            <Route path="/admin/parties" element={<PartiesPage />} />
           </Route>
         </Route>
 
