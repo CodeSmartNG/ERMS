@@ -25,5 +25,6 @@ router.use('/elections', electionRoutes);
 router.use('/notifications', notificationRoutes);
 router.use('/geo', geoRoutes);
 router.use('/parties', partyRoutes);
+router.use('/candidates', require('./candidateRoutes'));
 
 module.exports = router;
