@@ -110,3 +110,14 @@ export const collationApi = {
   pu: (election, code) => api.get(`/collation/${election}/pu/${code}`),
   parties: (election, level) => api.get(`/collation/${election}/parties`, { params: { level } }),
 };
+
+export const electionsApi = {
+  list: () => api.get('/elections'),
+  create: (data) => api.post('/elections', data),
+  updateStatus: (id, status) => api.patch(`/elections/${id}/status`, { status }),
+};
+
+export const partiesApi = {
+  list: () => api.get('/parties'),
+  create: (data) => api.post('/parties', data),
+};
