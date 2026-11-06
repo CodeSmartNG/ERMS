@@ -4,19 +4,16 @@ const audit = require('../services/auditService');
 const { ELECTION_STATUSES } = require('../models/Election');
 
 // =================================================================
-// LIST ELECTIONS (scoped)
+// LIST ELECTIONS
 // =================================================================
 async function list(req, res) {
   const { status, type, page = 1, limit = 50 } = req.query;
 
   if (status && !ELECTION_STATUSES.includes(status)) {
-    throw ApiError.badRequest(
-      `status must be one of: ${ELECTION_STATUSES.join(', ')}`
-    );
+    throw ApiError.badRequest(`status must be one of: ${ELECTION_STATUSES.join(', ')}`);
   }
 
   const filter = {};
-
   if (status) filter.status = status;
   if (type) filter.type = type;
 
@@ -42,49 +39,29 @@ async function list(req, res) {
   const take = Math.min(200, Math.max(1, parseInt(limit, 10)));
 
   const [elections, total] = await Promise.all([
-    models.Election.find(filter)
-      .sort({ electionDate: -1 })
-      .skip(skip)
-      .limit(take)
-      .select('code title type electionDate status states publishedAt createdAt')
-      .lean(),
+    models.Election.find(filter).sort({ electionDate: -1 }).skip(skip).limit(take).lean(),
     models.Election.countDocuments(filter),
   ]);
 
-  res.json({
-    elections,
-    pagination: {
-      page: Math.floor(skip / take) + 1,
-      limit: take,
-      total,
-      pages: Math.ceil(total / take),
-    },
-  });
+  res.json({ elections, pagination: { page: Math.floor(skip / take) + 1, limit: take, total, pages: Math.ceil(total / take) } });
 }
 
 // =================================================================
 // GET PARTIES FOR AN ELECTION
 // =================================================================
 async function parties(req, res) {
-  const election = await models.Election.findById(req.params.id)
-    .select('_id states')
-    .lean();
+  const election = await models.Election.findById(req.params.id).select('_id states').lean();
   if (!election) throw ApiError.notFound('Election not found');
 
   const user = req.user;
   if (user.scope?.state && election.states.length > 0) {
     const allowed = election.states.some((s) => s.equals(user.scope.state));
-    if (!allowed) {
-      throw ApiError.forbidden('Election is not active in your state');
-    }
+    if (!allowed) throw ApiError.forbidden('Election is not active in your state');
   }
 
-  const partyIds = await models.Candidate
-    .find({ election: election._id, isActive: true })
-    .distinct('party');
+  const partyIds = await models.Candidate.find({ election: election._id, isActive: true }).distinct('party');
 
-  const parties = await models.Party
-    .find({ _id: { $in: partyIds }, isActive: true })
+  const parties = await models.Party.find({ _id: { $in: partyIds }, isActive: true })
     .sort({ code: 1 })
     .select('code name abbreviation color logoUrl')
     .lean();
@@ -93,7 +70,7 @@ async function parties(req, res) {
 }
 
 // =================================================================
-// CREATE ELECTION (Super Admin only)
+// CREATE ELECTION
 // =================================================================
 async function create(req, res) {
   const { code, title, type, electionDate, status, states } = req.body;
@@ -122,7 +99,7 @@ async function create(req, res) {
 }
 
 // =================================================================
-// UPDATE STATUS (Super Admin only)
+// UPDATE STATUS
 // =================================================================
 async function updateStatus(req, res) {
   const { status } = req.body;
