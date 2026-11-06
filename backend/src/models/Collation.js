@@ -16,8 +16,6 @@ const partyTotalSchema = new mongoose.Schema(
   { _id: false }
 );
 
-// Snapshot of the leading party for the entity — eliminates the need to
-// sort partyTotals on every dashboard read.
 const leadingPartySchema = new mongoose.Schema(
   {
     party:     { type: mongoose.Schema.Types.ObjectId, ref: 'Party', default: null },
@@ -43,47 +41,32 @@ const collationSchema = new mongoose.Schema(
 
     level: { type: String, enum: LEVELS, required: true, index: true },
 
-    // Entity being collated:
-    //   WARD     → Ward._id / ward.code
-    //   LGA      → LGA._id / lga.code
-    //   STATE    → State._id / state.code
-    //   NATIONAL → null / null
     entity: { type: mongoose.Schema.Types.ObjectId, default: null },
     entityCode: { type: String, default: null, index: true, uppercase: true },
 
-    // Denormalized names — populated by collationService so reports don't
-    // require a second lookup against Ward/LGA/State collections.
     entityName: { type: String, default: null },
     stateName:  { type: String, default: null },
     lgaName:    { type: String, default: null },
     wardName:   { type: String, default: null },
 
-    // Denormalized parent codes for drill-down UI + filter shortcuts
     stateCode: { type: String, default: null, index: true, uppercase: true },
     lgaCode:   { type: String, default: null, index: true, uppercase: true },
     wardCode:  { type: String, default: null, index: true, uppercase: true },
 
-    // Party totals — sorted desc by votes at write time.
     partyTotals: { type: [partyTotalSchema], default: [] },
-
-    // Pre-computed leader for the entity. Always mirrors partyTotals[0].
     leadingParty: { type: leadingPartySchema, default: () => ({}) },
 
-    // Vote roll-ups
     registeredVoters: { type: Number, required: true, min: 0, default: 0 },
     accreditedVoters: { type: Number, required: true, min: 0, default: 0 },
     totalVotesCast:   { type: Number, required: true, min: 0, default: 0 },
     totalValidVotes:  { type: Number, required: true, min: 0, default: 0 },
     rejectedBallots:  { type: Number, default: 0, min: 0 },
 
-    // Coverage metrics
     pollingUnitsTotal:    { type: Number, required: true, min: 0, default: 0 },
     pollingUnitsReported: { type: Number, required: true, min: 0, default: 0 },
     pollingUnitsVerified: { type: Number, required: true, min: 0, default: 0 },
     reportingPercentage:  { type: Number, min: 0, max: 100, default: 0 },
 
-    // Data quality flags — set by computeLevel when inconsistencies detected.
-    // The dashboard renders a warning icon when this array is non-empty.
     dataIssues: {
       type: [{
         type: String,
@@ -99,11 +82,9 @@ const collationSchema = new mongoose.Schema(
       default: [],
     },
 
-    // Aggregation source integrity
     sourceHash:  { type: String, required: true, index: true },
     sourceCount: { type: Number, required: true, min: 0, default: 0 },
 
-    // Authorship + lifecycle
     collatedBy:  { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
     collatedAt:  { type: Date, default: Date.now, index: true },
     publishedAt: { type: Date, default: null },
@@ -117,30 +98,21 @@ const collationSchema = new mongoose.Schema(
 // =====================================================================
 // Indexes
 // =====================================================================
-
-// One current collation per (election, level, entity).
-// MongoDB treats null as a value, so this correctly enforces "one NATIONAL".
 collationSchema.index(
   { election: 1, level: 1, entity: 1, isCurrent: 1 },
   { unique: true, partialFilterExpression: { isCurrent: true } }
 );
-
-// Dashboard hot paths
 collationSchema.index({ election: 1, level: 1, 'partyTotals.votes': -1 });
 collationSchema.index({ election: 1, level: 1, reportingPercentage: -1 });
 collationSchema.index({ election: 1, level: 1, stateCode: 1 });
 collationSchema.index({ election: 1, level: 1, lgaCode: 1 });
 collationSchema.index({ election: 1, level: 1, wardCode: 1 });
-
-// Most-recent-first listing for history views
 collationSchema.index({ election: 1, level: 1, collatedAt: -1 });
 
 // =====================================================================
 // Validators
 // =====================================================================
-
 collationSchema.pre('validate', function (next) {
-  // 1) entityCode must be present for everything except NATIONAL
   if (this.level !== 'NATIONAL' && !this.entityCode) {
     return next(new Error(`entityCode is required for level ${this.level}`));
   }
@@ -148,7 +120,6 @@ collationSchema.pre('validate', function (next) {
     return next(new Error('entityCode must be null for NATIONAL collation'));
   }
 
-  // 2) entity must be present for everything except NATIONAL
   if (this.level !== 'NATIONAL' && !this.entity) {
     return next(new Error(`entity is required for level ${this.level}`));
   }
@@ -156,11 +127,127 @@ collationSchema.pre('validate', function (next) {
     return next(new Error('entity must be null for NATIONAL collation'));
   }
 
-  // 3) No duplicate party codes in partyTotals
   const codes = this.partyTotals.map((p) => p.partyCode);
   if (new Set(codes).size !== codes.length) {
     return next(new Error('partyTotals contains duplicate partyCode entries'));
   }
 
-  // 4) totalValidVotes must equal sum of partyTotals.votes
-  const sum = this.partyTotals.reduce((s, p) => s +
+  const sum = this.partyTotals.reduce((s, p) => s + p.votes, 0);
+  if (sum !== this.totalValidVotes) {
+    return next(
+      new Error(`totalValidVotes (${this.totalValidVotes}) must equal sum of partyTotals (${sum})`)
+    );
+  }
+
+  if (this.totalVotesCast > this.accreditedVoters + this.rejectedBallots) {
+    return next(
+      new Error('totalVotesCast cannot exceed accreditedVoters + rejectedBallots')
+    );
+  }
+
+  if (this.accreditedVoters > this.registeredVoters) {
+    return next(new Error('accreditedVoters cannot exceed registeredVoters'));
+  }
+
+  if (this.pollingUnitsVerified > this.pollingUnitsReported) {
+    return next(new Error('pollingUnitsVerified cannot exceed pollingUnitsReported'));
+  }
+  
+  if (this.pollingUnitsReported > this.pollingUnitsTotal) {
+    return next(new Error('pollingUnitsReported cannot exceed pollingUnitsTotal'));
+  }
+
+  next();
+});
+
+collationSchema.pre('save', function (next) {
+  if (this.pollingUnitsTotal > 0) {
+    this.reportingPercentage = Math.round(
+      (this.pollingUnitsReported / this.pollingUnitsTotal) * 10000
+    ) / 100;
+  } else {
+    this.reportingPercentage = 0;
+  }
+  next();
+});
+
+// =====================================================================
+// Statics
+// =====================================================================
+collationSchema.statics.computeSourceHash = function (sourceHashes) {
+  const sorted = [...sourceHashes].sort();
+  const material = sorted.join('|');
+  return crypto.createHash('sha256').update(material).digest('hex');
+};
+
+collationSchema.statics.findCurrent = function (electionId, level, entityId = null) {
+  return this.findOne({
+    election: electionId,
+    level,
+    entity: entityId || null,
+    isCurrent: true,
+  });
+};
+
+collationSchema.statics.findCurrentByLevel = function (electionId, level, extraFilter = {}) {
+  return this.find({
+    election: electionId,
+    level,
+    isCurrent: true,
+    ...extraFilter,
+  }).sort({ entityCode: 1 });
+};
+
+collationSchema.statics.buildLeadingParty = function (partyTotals, totalValidVotes) {
+  if (!partyTotals || partyTotals.length === 0) {
+    return { party: null, partyCode: null, votes: 0, percentage: 0 };
+  }
+  const top = [...partyTotals].sort((a, b) => b.votes - a.votes)[0];
+  return {
+    party: top.party,
+    partyCode: top.partyCode,
+    votes: top.votes,
+    percentage: totalValidVotes > 0
+      ? Math.round((top.votes / totalValidVotes) * 10000) / 100
+      : 0,
+  };
+};
+
+collationSchema.statics.detectDataIssues = function (payload) {
+  const issues = [];
+
+  if (payload.totalVotesCast > payload.accreditedVoters + payload.rejectedBallots) {
+    issues.push('votes_exceed_accredited');
+  }
+  if (payload.totalValidVotes > payload.totalVotesCast) {
+    issues.push('valid_exceed_cast');
+  }
+
+  const partySum = payload.partyTotals.reduce((s, p) => s + p.votes, 0);
+  if (partySum !== payload.totalValidVotes) {
+    issues.push('party_sum_mismatch');
+  }
+
+  const codes = payload.partyTotals.map((p) => p.partyCode);
+  if (new Set(codes).size !== codes.length) {
+    issues.push('duplicate_party_codes');
+  }
+
+  if (payload.partyTotals.length > 0 && payload.partyTotals.every((p) => p.votes === 0)) {
+    issues.push('zero_party_totals');
+  }
+
+  if (payload.reportingPercentage > 100) {
+    issues.push('reporting_exceeds_100');
+  }
+
+  return issues;
+};
+
+// =====================================================================
+// Exports
+// =====================================================================
+const Collation = mongoose.model('Collation', collationSchema);
+Collation.COLLATION_LEVELS = LEVELS;
+
+module.exports = Collation;
