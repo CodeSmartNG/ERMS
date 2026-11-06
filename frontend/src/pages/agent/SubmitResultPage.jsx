@@ -5,9 +5,11 @@ import { toast } from 'sonner';
 import api from '@/services/api';
 import { enqueue } from '@/services/offlineQueue';
 import { flushQueue } from '@/services/syncService';
+import { useAuth } from '@/context/AuthContext'; // <-- ADDED
 
 export default function SubmitResultPage() {
   const navigate = useNavigate();
+  const { user } = useAuth(); // <-- ADDED
 
   const [elections, setElections] = useState([]);
   const [parties, setParties] = useState([]);
@@ -25,7 +27,6 @@ export default function SubmitResultPage() {
   const [photo, setPhoto] = useState(null);
   const [notes, setNotes] = useState('');
 
-  // Load elections
   useEffect(() => {
     (async () => {
       try {
@@ -39,7 +40,6 @@ export default function SubmitResultPage() {
     })();
   }, []);
 
-  // Load parties
   useEffect(() => {
     if (!electionId) { setParties([]); setVotes({}); return; }
     (async () => {
@@ -70,6 +70,7 @@ export default function SubmitResultPage() {
 
     const payload = {
       election: electionId,
+      pollingUnit: user?.scope?.pollingUnit, // <-- ADDED: Pulls the agent's PU ID
       registeredVoters: Number(registeredVoters),
       accreditedVoters: Number(accreditedVoters),
       totalVotesCast: Number(totalVotesCast),
