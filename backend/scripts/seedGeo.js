@@ -50,7 +50,14 @@ async function* readCsvRows(file) {
 }
 
 async function main() {
+  // ADD THIS LINE: Force delete the old partial CSV so it redownloads
+  if (fs.existsSync(CSV_PATH)) {
+    fs.unlinkSync(CSV_PATH);
+    console.log('🗑️ Deleted old CSV cache.');
+  }
+
   await mongoose.connect(env.MONGODB_URI);
+  
   console.log(`✅ MongoDB connected`);
   
   console.log('🧹 Clearing old geo data...');
