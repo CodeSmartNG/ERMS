@@ -9,13 +9,11 @@ const models = require('../src/models');
 
 const CSV_PATH = path.resolve(__dirname, '../data/nigeria_polling_units.csv');
 
-// Lowercase the list to make comparison foolproof
 const ALLOWED_STATES = [
   'katsina', 'kano', 'sokoto', 'zamfara', 'adamawa', 
   'bauchi', 'kaduna', 'jigawa', 'kebbi', 'yobe'
 ];
 
-// NEW: Hardcoded INEC codes to prevent duplicate key errors (e.g., Kano/Katsina/Kaduna all starting with 'KA')
 const STATE_CODES = {
   'Adamawa': 'AD', 'Bauchi': 'BA', 'Jigawa': 'JI', 'Kaduna': 'KD', 'Kano': 'KN',
   'Katsina': 'KT', 'Kebbi': 'KE', 'Sokoto': 'SO', 'Yobe': 'YO', 'Zamfara': 'ZA'
@@ -28,6 +26,13 @@ const ZONE_BY_STATE = {
 
 function slugify(s) {
   return s.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+}
+
+// Forces "adamawa", "ADAMAWA", "Adamawa " into "Adamawa"
+function formatStateName(name) {
+  if (!name) return '';
+  const lower = name.trim().toLowerCase();
+  return lower.charAt(0).toUpperCase() + lower.slice(1);
 }
 
 async function* readCsvRows(file) {
@@ -48,7 +53,6 @@ async function main() {
   await mongoose.connect(env.MONGODB_URI);
   console.log(`✅ MongoDB connected`);
   
-  // WIPE OLD DATA
   console.log('🧹 Clearing old geo data...');
   await models.PollingUnit.deleteMany({});
   await models.Ward.deleteMany({});
@@ -63,44 +67,53 @@ async function main() {
 
   try {
     for await (const row of readCsvRows(CSV_PATH)) {
-      const stateName = row.state?.trim();
+      const rawStateName = row.state?.trim();
       const lgaName = row.lg?.trim();
       const wardName = row.ward?.trim();
       const puName = row.location || row.pu_name || `PU ${row.pu_code || row.code}`;
       const puCode = row.code || row.pu_code;
 
-      if (!stateName || !lgaName || !wardName || !puCode) {
+      if (!rawStateName || !lgaName || !wardName || !puCode) {
         stats.skipped++;
         continue;
       }
 
-      // Check if state is in our allowed list (case-insensitive)
+      // Force title case (e.g. "adamawa" -> "Adamawa")
+      const stateName = formatStateName(rawStateName);
+
+      // Check if state is in our allowed list
       if (!ALLOWED_STATES.includes(stateName.toLowerCase())) {
         stats.skipped++;
         continue;
       }
 
-      // Use the hardcoded map, or fallback to the CSV, or fallback to first 2 letters
-      const stateCode = STATE_CODES[stateName] || (row.state_code || '').toUpperCase() || stateName.slice(0, 2).toUpperCase();
+      const stateCode = STATE_CODES[stateName] || stateName.slice(0, 2).toUpperCase();
 
       // ---- State ----
       let state = stateCache.get(stateName);
       if (!state) {
-        state = await models.State.findOneAndUpdate(
-          { code: stateCode },
-          { $setOnInsert: { 
-              code: stateCode, 
-              name: stateName, 
-              slug: slugify(stateName), 
-              zone: ZONE_BY_STATE[stateName] || 'NC', 
-              isActive: true 
-            } 
-          },
-          { upsert: true, new: true, lean: true }
-        );
-        stateCache.set(stateName, state);
-        stats.states++;
-        console.log(`[Seed]: Created State ${stateName} (${stateCode})`);
+        // Use try/catch so if it hits a duplicate, it continues instead of crashing
+        try {
+          state = await models.State.findOneAndUpdate(
+            { code: stateCode },
+            { $setOnInsert: { 
+                code: stateCode, 
+                name: stateName, 
+                slug: slugify(stateName), 
+                zone: ZONE_BY_STATE[stateName] || 'NC', 
+                isActive: true 
+              } 
+            },
+            { upsert: true, new: true, lean: true }
+          );
+          stateCache.set(stateName, state);
+          stats.states++;
+          console.log(`[Seed]: Created State ${stateName} (${stateCode})`);
+        } catch (err) {
+          // If it fails, skip this row entirely
+          stats.skipped++;
+          continue;
+        }
       }
 
       // ---- LGA ----
