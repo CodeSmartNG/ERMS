@@ -63,9 +63,6 @@ async function rebuildForResult(result, actorId = null) {
 /**
  * Recompute a single collation document. All persistence goes through here.
  * Returns the new Collation doc, or null if the entity has no source data.
- *
- * If source data disappeared (e.g. all results deleted or un-verified),
- * retires any previous current doc so dashboards don't show stale data.
  */
 async function rebuildLevel(electionId, level, entityId, actorId = null) {
   const payload = await computeLevel(electionId, level, entityId);
@@ -116,7 +113,7 @@ async function rebuildLevel(electionId, level, entityId, actorId = null) {
             entity: entityId || null,
             entityCode: payload.entityCode,
 
-            // Denormalized names (schema fields added in model update)
+            // Denormalized names
             entityName: payload.entityName || null,
             stateName: payload.stateName || null,
             lgaName: payload.lgaName || null,
@@ -125,6 +122,9 @@ async function rebuildLevel(electionId, level, entityId, actorId = null) {
             stateCode: payload.stateCode,
             lgaCode: payload.lgaCode,
             wardCode: payload.wardCode,
+
+            // NEW: Set status to VERIFIED so dashboards pick it up
+            status: 'VERIFIED', 
 
             partyTotals: payload.partyTotals,
 
@@ -232,7 +232,6 @@ async function computeLGA(electionId, lgaId) {
   if (!lga) return null;
 
   const [partyAgg, metaAgg, puTotal, state] = await Promise.all([
-    // Party roll-up across wards
     Collation.aggregate([
       {
         $match: {
@@ -252,7 +251,6 @@ async function computeLGA(electionId, lgaId) {
       },
       { $sort: { votes: -1 } },
     ]),
-    // Metadata roll-up (voters, PUs, hashes)
     Collation.aggregate([
       {
         $match: {
@@ -308,7 +306,7 @@ async function computeLGA(electionId, lgaId) {
     reportingPercentage:
       puTotal > 0 ? round((meta.pollingUnitsReported / puTotal) * 100) : 0,
     sourceHash: Collation.computeSourceHash(meta.sourceHashes.filter(Boolean)),
-    sourceCount: meta.pollingUnitsVerified, // consistent: # of PUs contributing
+    sourceCount: meta.pollingUnitsVerified,
   };
 }
 
@@ -468,7 +466,6 @@ function round(n) {
 }
 
 function buildCommon(data, puTotal) {
-  // Sum nested partyVotes arrays from every result at this level
   const partyMap = new Map();
   for (const pvArray of data.partyTotals) {
     for (const pv of pvArray) {
@@ -505,12 +502,6 @@ function buildCommon(data, puTotal) {
 // Full rebuild — used when backfilling or recovering from a bug.
 // ---------------------------------------------------------------
 
-/**
- * Wipes every current collation for this election and rebuilds every level
- * in order (ward → LGA → state → national). Slow on big datasets; safe.
- *
- * Idempotent: running twice gives identical sourceHash at every level.
- */
 async function rebuildAllForElection(electionId, actorId = null) {
   console.log(`[collation] full rebuild starting for election ${electionId}`);
 
@@ -561,14 +552,9 @@ async function rebuildAllForElection(electionId, actorId = null) {
 }
 
 // ---------------------------------------------------------------
-// Verification — recompute sourceHash from source and compare.
+// Verification
 // ---------------------------------------------------------------
 
-/**
- * Verifies that a Collation doc's sourceHash still matches what a fresh
- * aggregation produces. Returns { ok, expected, actual, reason? }.
- * Non-destructive.
- */
 async function verifyCollation(collationId) {
   const doc = await Collation.findById(collationId).lean();
   if (!doc) throw new Error('Collation not found');
