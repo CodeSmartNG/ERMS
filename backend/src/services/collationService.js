@@ -149,53 +149,19 @@ function combineCollations(collations, pollingUnitsTotal) {
 
   const partyTotals = normalizePartyTotals(partyItems);
 
-  const registeredVoters = sumField(
-    collations,
-    'registeredVoters'
-  );
+  const registeredVoters = sumField(collations, 'registeredVoters');
+  const accreditedVoters = sumField(collations, 'accreditedVoters');
+  const totalVotesCast = sumField(collations, 'totalVotesCast');
+  const totalValidVotes = sumField(collations, 'totalValidVotes');
+  const rejectedBallots = sumField(collations, 'rejectedBallots');
+  const pollingUnitsReported = sumField(collations, 'pollingUnitsReported');
+  const pollingUnitsVerified = sumField(collations, 'pollingUnitsVerified');
+  const sourceCount = sumField(collations, 'sourceCount');
 
-  const accreditedVoters = sumField(
-    collations,
-    'accreditedVoters'
-  );
-
-  const totalVotesCast = sumField(
-    collations,
-    'totalVotesCast'
-  );
-
-  const totalValidVotes = sumField(
-    collations,
-    'totalValidVotes'
-  );
-
-  const rejectedBallots = sumField(
-    collations,
-    'rejectedBallots'
-  );
-
-  const pollingUnitsReported = sumField(
-    collations,
-    'pollingUnitsReported'
-  );
-
-  const pollingUnitsVerified = sumField(
-    collations,
-    'pollingUnitsVerified'
-  );
-
-  const hashes = collations.map(
-    (item) => item.sourceHash
-  );
-
-  const sourceCount = sumField(
-    collations,
-    'sourceCount'
-  );
+  const hashes = collations.map((item) => item.sourceHash);
 
   return {
     partyTotals,
-
     ...buildCommon(
       {
         registeredVoters,
@@ -208,9 +174,8 @@ function combineCollations(collations, pollingUnitsTotal) {
       },
       pollingUnitsTotal
     ),
-
     sourceHash: createSourceHash(hashes),
-    sourceCount,
+    sourceCount, // <--- ADDED THIS LINE
   };
 }
 
