@@ -1,50 +1,31 @@
 const express = require('express');
 const mongoose = require('mongoose');
 const models = require('../models');
-const collationService = require('../services/collationService');
 const router = express.Router();
 
 router.get('/:electionId', async (req, res) => {
   try {
-    const electionIdStr = req.params.electionId;
-    
-    if (!mongoose.Types.ObjectId.isValid(electionIdStr)) {
-      return res.status(400).json({ error: 'Invalid election ID format.' });
-    }
-    
-    const electionId = new mongoose.Types.ObjectId(electionIdStr);
+    const electionId = new mongoose.Types.ObjectId(req.params.electionId);
 
-    // 1. Check database connection
-    if (mongoose.connection.readyState !== 1) {
-      return res.status(500).json({ error: 'Database is not connected.' });
-    }
+    // 1. Check how many results are saved and verified
+    const allResults = await models.Result.countDocuments({ election: electionId, isCurrent: true });
+    const verifiedResults = await models.Result.countDocuments({ election: electionId, isCurrent: true, status: 'VERIFIED' });
+    
+    // 2. Check if any collation documents exist at all
+    const collations = await models.Collation.find({ election: electionId }).lean();
 
-    // 2. Check if there are verified results
-    const resultsCount = await models.Result.countDocuments({ 
-      election: electionId, 
-      isCurrent: true, 
-      status: 'VERIFIED' 
+    res.status(200).json({
+      success: true,
+      debug: {
+        totalCurrentResults: allResults,
+        totalVerifiedResults: verifiedResults,
+        collationsInDb: collations.length,
+        sampleCollation: collations.length > 0 ? collations[0] : null,
+        verifiedResultSample: verifiedResults > 0 ? await models.Result.findOne({ election: electionId, isCurrent: true, status: 'VERIFIED' }).lean() : null
+      }
     });
-
-    if (resultsCount === 0) {
-      return res.status(400).json({ error: 'No VERIFIED results found for this election in the database.' });
-    }
-
-    // 3. Run the rebuild
-    await collationService.rebuildAllForElection(electionId);
-    
-    res.json({ 
-      success: true, 
-      message: `Found ${resultsCount} verified results. Collation rebuilt successfully!` 
-    });
-
   } catch (err) {
-    console.error('SEED ROUTE ERROR:', err);
-    // This forces the error to show on your screen
-    res.status(500).json({ 
-      error: err.message,
-      stack: err.stack
-    });
+    res.status(500).json({ error: err.message, stack: err.stack });
   }
 });
 
