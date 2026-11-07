@@ -5,7 +5,6 @@ import { useApi } from '@/hooks/useApi';
 import { usersApi, geoApi } from '@/services/api';
 import { useAuth } from '@/context/AuthContext';
 
-// Define which roles each role is allowed to create
 const CREATABLE_ROLES = {
   NATIONAL_SUPER_ADMIN: ['STATE_ADMIN', 'LGA_ADMIN', 'WARD_ADMIN', 'POLLING_UNIT_AGENT'],
   STATE_ADMIN: ['LGA_ADMIN', 'WARD_ADMIN', 'POLLING_UNIT_AGENT'],
@@ -23,7 +22,6 @@ const ROLE_LABELS = {
 export default function UsersPage() {
   const { user } = useAuth();
   
-  // Get the roles the current user is allowed to create
   const allowedRoles = CREATABLE_ROLES[user.role] || [];
   const [role, setRole] = useState(allowedRoles[0] || '');
 
@@ -33,8 +31,8 @@ export default function UsersPage() {
   const [lastName, setLastName] = useState('');
   
   // Geo states
-  const [stateCode, setStateCode] = useState(user.scope?.stateCode || ''); // Pre-fill if State/LGA Admin
-  const [lgaCode, setLgaCode] = useState(user.scope?.lgaCode || '');
+  const [stateCode, setStateCode] = useState('');
+  const [lgaCode, setLgaCode] = useState('');
   const [wardCode, setWardCode] = useState('');
   const [puId, setPuId] = useState('');
 
@@ -46,17 +44,38 @@ export default function UsersPage() {
   const wardsApi = useApi(() => lgaCode ? geoApi.wards(lgaCode) : Promise.resolve([]), [lgaCode], { initial: [] });
   const pusApi = useApi(() => wardCode ? geoApi.pollingUnits(wardCode) : Promise.resolve([]), [wardCode], { initial: [] });
 
-  // Reset lower dropdowns when parent changes
-  useEffect(() => { if (!user.scope?.lgaCode) setLgaCode(''); setWardCode(''); setPuId(''); }, [stateCode]);
-  useEffect(() => { if (!user.scope?.wardCode) setWardCode(''); setPuId(''); }, [lgaCode]);
+  // Determine locks
+  const isStateLocked = user.role !== 'NATIONAL_SUPER_ADMIN' && user.scope?.state;
+  const isLgaLocked = user.role === 'LGA_ADMIN' || user.role === 'WARD_ADMIN';
+
+  // Auto-fill state code if locked
+  useEffect(() => {
+    if (isStateLocked && user.scope?.state && statesApi.data.length > 0) {
+      const s = statesApi.data.find(x => x._id === user.scope.state);
+      if (s) setStateCode(s.code);
+    }
+  }, [isStateLocked, user.scope?.state, statesApi.data]);
+
+  // Auto-fill lga code if locked
+  useEffect(() => {
+    if (isLgaLocked && user.scope?.lga && lgasApi.data.length > 0) {
+      const l = lgasApi.data.find(x => x._id === user.scope.lga);
+      if (l) setLgaCode(l.code);
+    }
+  }, [isLgaLocked, user.scope?.lga, lgasApi.data]);
+
+  // Reset lower dropdowns when parent changes (only if not locked)
+  useEffect(() => { if (!isLgaLocked) { setLgaCode(''); setWardCode(''); setPuId(''); } }, [stateCode, isLgaLocked]);
+  useEffect(() => { setWardCode(''); setPuId(''); }, [lgaCode]);
   useEffect(() => { setPuId(''); }, [wardCode]);
 
   async function handleCreate(e) {
     e.preventDefault();
     setBusy(true);
     try {
-      const stateId = statesApi.data.find(s => s.code === stateCode)?._id;
-      const lgaId = lgasApi.data.find(l => l.code === lgaCode)?._id;
+      // Use IDs directly if locked, otherwise find them from the dropdowns
+      const stateId = isStateLocked ? user.scope.state : statesApi.data.find(s => s.code === stateCode)?._id;
+      const lgaId = isLgaLocked ? user.scope.lga : lgasApi.data.find(l => l.code === lgaCode)?._id;
       const wardId = wardsApi.data.find(w => w.code === wardCode)?._id;
 
       const scope = {};
@@ -80,9 +99,8 @@ export default function UsersPage() {
 
       toast.success(`${ROLE_LABELS[role]} created successfully`);
       setEmail(''); setPassword(''); setFirstName(''); setLastName('');
-      // Don't reset state/lga if they are locked to the admin's scope
-      if (user.role === 'NATIONAL_SUPER_ADMIN') setStateCode('');
-      setWardCode(''); setPuId('');
+      if (!isLgaLocked) setWardCode(''); 
+      setPuId('');
     } catch (err) {
       toast.error(err.response?.data?.error || 'Failed to create user');
     } finally { setBusy(false); }
@@ -92,10 +110,6 @@ export default function UsersPage() {
   const needsLga = ['LGA_ADMIN', 'WARD_ADMIN', 'POLLING_UNIT_AGENT'].includes(role);
   const needsWard = ['WARD_ADMIN', 'POLLING_UNIT_AGENT'].includes(role);
   const needsPu = role === 'POLLING_UNIT_AGENT';
-
-  // Determine if the current user is locked to a specific state/lga
-  const isStateLocked = user.role !== 'NATIONAL_SUPER_ADMIN' && user.scope?.state;
-  const isLgaLocked = user.role !== 'NATIONAL_SUPER_ADMIN' && user.role !== 'STATE_ADMIN' && user.scope?.lga;
 
   return (
     <div className="mx-auto max-w-3xl space-y-4 p-4 sm:p-6">
@@ -178,7 +192,7 @@ export default function UsersPage() {
 
         </div>
 
-        <button type="submit" disabled={busy || !stateCode} className="btn-primary mt-4">
+        <button type="submit" disabled={busy || (needsState && !stateCode) || (needsWard && !wardCode)} className="btn-primary mt-4">
           {busy ? 'Creating…' : `Create ${ROLE_LABELS[role]}`}
         </button>
       </form>
