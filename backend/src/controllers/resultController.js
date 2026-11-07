@@ -25,25 +25,20 @@ async function submit(req, res) {
   const body = req.body;
   const { user, scope } = req;
 
-  // --- role gate: only PU agents (and super admin for testing) ---
   if (![ROLES.POLLING_UNIT_AGENT, ROLES.NATIONAL_SUPER_ADMIN].includes(user.role)) {
     throw ApiError.forbidden('Only polling unit agents can submit results');
   }
 
-  // --- PU agent is locked to their own PU ---
   if (user.role === ROLES.POLLING_UNIT_AGENT) {
     if (!scope.pollingUnit || !scope.pollingUnit.equals(body.pollingUnit)) {
       throw ApiError.forbidden('You may only submit results for your assigned polling unit');
     }
   }
 
-  // --- evidence file ---
   if (!req.file) throw ApiError.badRequest('Evidence photo is required (field: evidence)');
 
-  // --- resolve authoritative geo data from PU — never trust client ---
   const geo = await resolvePollingUnit(body.pollingUnit);
 
-  // --- election must exist, be scoped to this PU's state, and be ACTIVE ---
   const election = await models.Election.findById(body.election).lean();
   if (!election) throw ApiError.badRequest('Election not found');
   if (election.status !== 'ACTIVE') {
@@ -53,19 +48,14 @@ async function submit(req, res) {
     throw ApiError.badRequest('Election is not active in this state');
   }
 
-  // --- idempotency: return existing doc if same key already used ---
   const existing = await models.Result.findOne({
     election: body.election,
     idempotencyKey: body.idempotencyKey,
   });
   if (existing) {
-    return res.status(200).json({
-      result: existing.toJSON(),
-      idempotentReplay: true,
-    });
+    return res.status(200).json({ result: existing.toJSON(), idempotentReplay: true });
   }
 
-  // --- numeric consistency (mirrors the pre-validate hook, but fail fast) ---
   const sumVotes = body.partyVotes.reduce((s, p) => s + p.votes, 0);
   if (sumVotes <= 0) throw ApiError.badRequest('Sum of party votes must be positive');
   if (body.accreditedVoters > body.registeredVoters) {
@@ -78,7 +68,6 @@ async function submit(req, res) {
     throw ApiError.badRequest('totalVotesCast cannot exceed accreditedVoters + rejectedBallots');
   }
 
-  // --- validate parties exist & belong to this election's candidates ---
   const partyIds = body.partyVotes.map((p) => p.party);
   const partyDocs = await models.Party.find({ _id: { $in: partyIds }, isActive: true })
     .select('code')
@@ -95,13 +84,10 @@ async function submit(req, res) {
   const validPartySet = new Set(candidateParties.map(String));
   for (const pv of body.partyVotes) {
     if (!validPartySet.has(pv.party)) {
-      throw ApiError.badRequest(
-        `Party ${partyCodeById.get(pv.party)} has no candidate in this election`
-      );
+      throw ApiError.badRequest(`Party ${partyCodeById.get(pv.party)} has no candidate in this election`);
     }
   }
 
-  // --- prepare + upload evidence (outside transaction, network-bound) ---
   const { buffer, hash: evidenceHash } = await prepareImage(req.file.buffer);
   const uploaded = await uploadEvidence({
     buffer,
@@ -111,10 +97,6 @@ async function submit(req, res) {
     idempotencyKey: body.idempotencyKey,
   });
 
-  // --- transaction: atomically determine version+previousHash and save ---
-  // The `current` lookup MUST be inside the transaction to avoid a race where
-  // two concurrent revisions compute the same version, then one fails on the
-  // partial unique index {election, pollingUnit, isCurrent:true}.
   const session = await mongoose.startSession();
   let resultDoc;
   let wasRevision = false;
@@ -169,8 +151,7 @@ async function submit(req, res) {
         },
 
         previousHash,
-        hash: '', // computed below
-
+        hash: '',
         version,
         isCurrent: true,
         supersedes: current?._id || null,
@@ -184,17 +165,15 @@ async function submit(req, res) {
 
       resultDoc.hash = computeHash(resultDoc, previousHash);
 
-if (current) {
-  // 1. Hide the old result FIRST
-  await models.Result.updateOne(
-    { _id: current._id, isCurrent: true },
-    { $set: { isCurrent: false, supersededBy: resultDoc._id, status: 'SUPERSEDED' } },
-    { session }
-  );
-}
+      if (current) {
+        await models.Result.updateOne(
+          { _id: current._id, isCurrent: true },
+          { $set: { isCurrent: false, supersededBy: resultDoc._id, status: 'SUPERSEDED' } },
+          { session }
+        );
+      }
 
-// 2. Then save the new result
-await resultDoc.save({ session });
+      await resultDoc.save({ session });
     });
   } finally {
     await session.endSession();
@@ -217,7 +196,6 @@ await resultDoc.save({ session });
     req,
   });
 
-  // --- notify the Ward Admin who owns this ward ---
   const wardAdmin = await models.User.findOne({
     role: ROLES.WARD_ADMIN,
     'scope.ward': geo.ward,
@@ -238,10 +216,7 @@ await resultDoc.save({ session });
     });
   }
 
-  // Invalidate collations up the tree so dashboards reflect the new submission
-  // (even before verification — reportingPercentage moves immediately).
   invalidateCollation(resultDoc, user._id, 'submit');
-
   res.status(201).json({ result: resultDoc.toJSON() });
 }
 
@@ -315,24 +290,13 @@ async function verify(req, res) {
   }
   if (!result.isCurrent) throw ApiError.badRequest('Cannot verify a superseded result');
 
-  // ==========================================
-  // NEW: Auto-correct the agent's math
-  // ==========================================
+  // Auto-correct math
   const partySum = result.partyVotes.reduce((sum, p) => sum + p.votes, 0);
-  
-  if (result.totalValidVotes !== partySum) {
-    result.totalValidVotes = partySum;
-  }
-  
-  const expectedCast = result.totalValidVotes + (result.rejectedBallots || 0);
-  if (result.totalVotesCast !== expectedCast) {
-    result.totalVotesCast = expectedCast;
-  }
-
+  result.totalValidVotes = partySum;
+  result.totalVotesCast = partySum + (result.rejectedBallots || 0);
   if (result.totalVotesCast > result.accreditedVoters) {
     result.accreditedVoters = result.totalVotesCast;
   }
-  // ==========================================
 
   result.status = 'VERIFIED';
   result.verifiedBy = req.user._id;
@@ -340,7 +304,31 @@ async function verify(req, res) {
   if (req.body.notes) result.notes = req.body.notes;
   await result.save();
 
-  // ... rest of the function stays the same
+  await audit.log({
+    actor: req.user._id,
+    actorRole: req.user.role,
+    action: 'RESULT_VERIFIED',
+    entity: 'Result',
+    entityId: result._id,
+    metadata: { election: result.election, puCode: result.puCode },
+    req,
+  });
+
+  await models.Notification.create({
+    recipient: result.submittedBy,
+    type: 'RESULT_VERIFIED',
+    title: 'Your result was verified',
+    body: `Result for PU ${result.puCode} was verified`,
+    link: `/results/${result._id}`,
+    refModel: 'Result',
+    refId: result._id,
+    severity: 'success',
+  });
+
+  invalidateCollation(result, req.user._id, 'verify');
+  res.json({ result: result.toJSON() });
+}
+
 // =================================================================
 // FLAG (ward admin and above — SUBMITTED or VERIFIED)
 // =================================================================
@@ -381,10 +369,7 @@ async function flag(req, res) {
     severity: 'warning',
   });
 
-  // CRITICAL when flagging a previously VERIFIED result: its votes must be
-  // removed from the collation tally.
   invalidateCollation(result, req.user._id, 'flag');
-
   res.json({ result: result.toJSON() });
 }
 
@@ -428,9 +413,7 @@ async function reject(req, res) {
     severity: 'critical',
   });
 
-  // If the result was previously VERIFIED, its votes must be removed.
   invalidateCollation(result, req.user._id, 'reject');
-
   res.json({ result: result.toJSON() });
 }
 
