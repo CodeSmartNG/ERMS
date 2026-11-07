@@ -581,20 +581,13 @@ async function rebuildLevel(
 
   let savedCollation;
 
+    let savedCollation;
+
   try {
     await session.withTransaction(async () => {
-      const filter = {
-        election: electionId,
-        level,
-      };
+      const filter = { election: electionId, level };
+      filter.entity = level === 'NATIONAL' ? null : entityId;
 
-      filter.entity = level === 'NATIONAL'
-        ? null
-        : entityId;
-
-      // Read the latest historical version, not just the
-      // current document. This preserves version history
-      // during full rebuilds.
       const previous = await Collation.findOne(filter)
         .sort({ version: -1 })
         .session(session)
@@ -603,37 +596,21 @@ async function rebuildLevel(
       const nextVersion = (previous?.version || 0) + 1;
 
       await Collation.updateMany(
-        {
-          ...filter,
-          isCurrent: true,
-        },
-        {
-          $set: {
-            isCurrent: false,
-          },
-        },
+        { ...filter, isCurrent: true },
+        { $set: { isCurrent: false } },
         { session }
       );
 
-      const leadingParty = buildLeadingParty(
-        payload.partyTotals,
-        payload.totalValidVotes
-      );
+      const leadingParty = buildLeadingParty(payload.partyTotals, payload.totalValidVotes);
 
       const documents = await Collation.create(
         [
           {
             ...payload,
-
             leadingParty,
-
-            // Generated collations are not drafts.
-            // Verification and publication remain separate steps.
             status: 'COLLATED',
-
             collatedBy: actorId || null,
             collatedAt: new Date(),
-
             version: nextVersion,
             isCurrent: true,
           },
@@ -644,16 +621,16 @@ async function rebuildLevel(
       savedCollation = documents[0];
     });
 
-    return {
-      success: true,
-      level,
-      version: savedCollation.version,
-      collation: savedCollation,
-    };
+    return { success: true, level, version: savedCollation.version, collation: savedCollation };
+
+  } catch (err) {
+    // If the math is invalid, don't crash the server. Just log it.
+    console.error(`[COLLATION SKIP] Failed to save ${level} for entity ${entityId}:`, err.message);
+    return { success: false, level, error: err.message };
   } finally {
     await session.endSession();
   }
-}
+  
 
 /* =====================================================
    RESULT CHANGE CASCADE
