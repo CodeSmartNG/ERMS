@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { toast } from 'sonner';
+import { AlertCircle, RefreshCw } from 'lucide-react';
 import { useApi } from '@/hooks/useApi';
 import { usersApi, geoApi } from '@/services/api';
 
@@ -18,7 +19,6 @@ export default function UsersPage() {
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   
-  // Geo states
   const [stateCode, setStateCode] = useState('');
   const [lgaCode, setLgaCode] = useState('');
   const [wardCode, setWardCode] = useState('');
@@ -32,7 +32,6 @@ export default function UsersPage() {
   const wardsApi = useApi(() => lgaCode ? geoApi.wards(lgaCode).then(r => r.data.wards) : Promise.resolve([]), [lgaCode], { initial: [] });
   const pusApi = useApi(() => wardCode ? geoApi.pollingUnits(wardCode).then(r => r.data.pollingUnits) : Promise.resolve([]), [wardCode], { initial: [] });
 
-  // Reset lower dropdowns when parent changes
   useEffect(() => { setLgaCode(''); setWardCode(''); setPuId(''); }, [stateCode]);
   useEffect(() => { setWardCode(''); setPuId(''); }, [lgaCode]);
   useEffect(() => { setPuId(''); }, [wardCode]);
@@ -41,12 +40,10 @@ export default function UsersPage() {
     e.preventDefault();
     setBusy(true);
     try {
-      // Find the actual ObjectIds based on the selected codes
       const stateId = statesApi.data.find(s => s.code === stateCode)?._id;
       const lgaId = lgasApi.data.find(l => l.code === lgaCode)?._id;
       const wardId = wardsApi.data.find(w => w.code === wardCode)?._id;
 
-      // Build the scope dynamically based on the role
       const scope = {};
       if (role === 'STATE_ADMIN') {
         scope.state = stateId;
@@ -64,14 +61,7 @@ export default function UsersPage() {
         scope.pollingUnit = puId;
       }
 
-      await usersApi.register({
-        email, 
-        password, 
-        firstName, 
-        lastName,
-        role,
-        scope
-      });
+      await usersApi.register({ email, password, firstName, lastName, role, scope });
 
       toast.success(`${role.replace('_', ' ')} created successfully`);
       setEmail(''); setPassword(''); setFirstName(''); setLastName('');
@@ -81,7 +71,6 @@ export default function UsersPage() {
     } finally { setBusy(false); }
   }
 
-  // Determine which dropdowns to show based on role
   const needsState = ['STATE_ADMIN', 'LGA_ADMIN', 'WARD_ADMIN', 'POLLING_UNIT_AGENT'].includes(role);
   const needsLga = ['LGA_ADMIN', 'WARD_ADMIN', 'POLLING_UNIT_AGENT'].includes(role);
   const needsWard = ['WARD_ADMIN', 'POLLING_UNIT_AGENT'].includes(role);
@@ -89,11 +78,27 @@ export default function UsersPage() {
 
   return (
     <div className="mx-auto max-w-3xl space-y-4 p-4 sm:p-6">
-      <h1 className="text-2xl font-bold text-slate-900">Create Administrator or Agent</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold text-slate-900">User Management</h1>
+      </div>
+
+      {/* Error banner if states fail to load */}
+      {statesApi.error && (
+        <div className="card border-red-200 bg-red-50 p-4">
+          <div className="flex items-start gap-3">
+            <AlertCircle className="mt-0.5 h-5 w-5 text-red-600" />
+            <div>
+              <p className="text-sm font-medium text-red-800">Failed to load states</p>
+              <p className="text-xs text-red-600 mt-1">{statesApi.error}</p>
+              <button onClick={() => statesApi.refetch()} className="mt-2 text-xs font-semibold text-red-700 flex items-center gap-1">
+                <RefreshCw className="h-3 w-3" /> Try again
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <form onSubmit={handleCreate} className="card space-y-4 p-5">
-        
-        {/* Role Selection */}
         <div>
           <label className="label">Role</label>
           <select required className="input font-semibold" value={role} onChange={e => setRole(e.target.value)}>
@@ -114,8 +119,8 @@ export default function UsersPage() {
           {needsState && (
             <div>
               <label className="label">State</label>
-              <select required className="input" value={stateCode} onChange={e => setStateCode(e.target.value)}>
-                <option value="">Select State…</option>
+              <select required className="input" value={stateCode} onChange={e => setStateCode(e.target.value)} disabled={statesApi.loading}>
+                <option value="">{statesApi.loading ? 'Loading states...' : 'Select State…'}</option>
                 {statesApi.data.map(s => <option key={s._id} value={s.code}>{s.name}</option>)}
               </select>
             </div>
@@ -153,7 +158,7 @@ export default function UsersPage() {
 
         </div>
 
-        <button type="submit" disabled={busy || (needsState && !stateCode) || (needsLga && !lgaCode) || (needsWard && !wardCode) || (needsPu && !puId)} className="btn-primary mt-4">
+        <button type="submit" disabled={busy || !stateCode} className="btn-primary mt-4">
           {busy ? 'Creating…' : `Create ${ROLES.find(r => r.value === role)?.label}`}
         </button>
       </form>
