@@ -100,15 +100,12 @@ function buildLeadingParty(partyTotals, totalValidVotes) {
     return null;
   }
 
-  const sorted = [...partyTotals].sort(
-    (a, b) => b.votes - a.votes
-  );
-
+  const sorted = [...partyTotals].sort((a, b) => b.votes - a.votes);
   const winner = sorted[0];
 
   return {
     party: winner.party,
-    code: winner.partyCode,
+    partyCode: winner.partyCode, // <--- MUST BE partyCode
     votes: winner.votes,
     percentage: totalValidVotes > 0
       ? round((winner.votes / totalValidVotes) * 100)
@@ -757,100 +754,54 @@ async function rebuildForResult(result, actorId) {
    FULL ELECTION REBUILD
 ===================================================== */
 
-async function rebuildAllForElection(electionId, actorId) {
+
+    async function rebuildAllForElection(electionId, actorId) {
   electionId = toObjectId(electionId);
 
   return withElectionLock(electionId, async () => {
-    console.log(
-      `[COLLATION] Starting full rebuild for election ${electionId}`
-    );
+    console.log(`[COLLATION] Starting full rebuild for election ${electionId}`);
 
-    // Do not retire every current collation first.
-    // Doing so would destroy the version lookup used by
-    // rebuildLevel and cause versions to restart at 1.
-
-    const wards = await Ward.find({
-      isActive: true,
-    })
-      .select('_id')
-      .lean();
-
-    const lgas = await LGA.find({
-      isActive: true,
-    })
-      .select('_id')
-      .lean();
-
-    const states = await State.find({
-      isActive: true,
-    })
-      .select('_id')
-      .lean();
+    // ONLY fetch entities that actually have VERIFIED results
+    const wards = await Result.distinct('ward', { election: electionId, isCurrent: true, status: VERIFIED_STATUS });
+    const lgas = await Result.distinct('lga', { election: electionId, isCurrent: true, status: VERIFIED_STATUS });
+    const states = await Result.distinct('state', { election: electionId, isCurrent: true, status: VERIFIED_STATUS });
 
     let wardCount = 0;
     let lgaCount = 0;
     let stateCount = 0;
 
-    // 1. Rebuild every ward.
-    for (const ward of wards) {
-      await rebuildLevel(
-        electionId,
-        'WARD',
-        ward._id,
-        actorId
-      );
-
+    // 1. Rebuild only the wards that have results
+    for (const wardId of wards) {
+      await rebuildLevel(electionId, 'WARD', wardId, actorId);
       wardCount++;
     }
 
-    // 2. Rebuild every LGA using the updated ward records.
-    for (const lga of lgas) {
-      await rebuildLevel(
-        electionId,
-        'LGA',
-        lga._id,
-        actorId
-      );
-
+    // 2. Rebuild only the LGAs that have results
+    for (const lgaId of lgas) {
+      await rebuildLevel(electionId, 'LGA', lgaId, actorId);
       lgaCount++;
     }
 
-    // 3. Rebuild every state using updated LGA records.
-    for (const state of states) {
-      await rebuildLevel(
-        electionId,
-        'STATE',
-        state._id,
-        actorId
-      );
-
+    // 3. Rebuild only the states that have results
+    for (const stateId of states) {
+      await rebuildLevel(electionId, 'STATE', stateId, actorId);
       stateCount++;
     }
 
-    // 4. Rebuild national last.
-    const national = await rebuildLevel(
-      electionId,
-      'NATIONAL',
-      null,
-      actorId
-    );
+    // 4. Rebuild national last
+    const national = await rebuildLevel(electionId, 'NATIONAL', null, actorId);
 
-    console.log(
-      `[COLLATION] Completed rebuild for election ${electionId}`
-    );
+    console.log(`[COLLATION] Completed rebuild for election ${electionId}`);
 
     return {
       success: true,
       electionId,
-      counts: {
-        wards: wardCount,
-        lgas: lgaCount,
-        states: stateCount,
-      },
+      counts: { wards: wardCount, lgas: lgaCount, states: stateCount },
       national,
     };
   });
 }
+
 
 /* =====================================================
    VERIFY COLLATION SOURCE
