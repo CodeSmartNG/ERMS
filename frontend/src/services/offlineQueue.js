@@ -70,3 +70,9 @@ export async function removeFromQueue(localId) {
   const db = await dbPromise;
   await db.delete('submissions', localId);
 }
+
+// --- NEW: Clear the entire queue (used on logout) ---
+export async function clearQueue() {
+  const db = await dbPromise;
+  await db.clear('submissions');
+}
