@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Plus, CheckCircle2, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { useApi } from '@/hooks/useApi';
-import { electionsApi } from '@/services/api';
+import { electionsApi, geoApi } from '@/services/api';
 
 const STATUS_BADGE = {
   DRAFT: 'badge-neutral',
@@ -13,6 +13,8 @@ const STATUS_BADGE = {
 
 export default function ElectionsPage() {
   const listApi = useApi(() => electionsApi.list().then(r => r.data.elections), [], { initial: [] });
+  const statesApi = useApi(() => geoApi.states().then(r => r.data.states), [], { initial: [] });
+
   const [showForm, setShowForm] = useState(false);
   const [busy, setBusy] = useState(false);
 
@@ -21,17 +23,29 @@ export default function ElectionsPage() {
   const [title, setTitle] = useState('');
   const [type, setType] = useState('PRESIDENTIAL');
   const [date, setDate] = useState('');
+  const [selectedState, setSelectedState] = useState(''); // NEW
 
   async function handleCreate(e) {
     e.preventDefault();
     setBusy(true);
     try {
+      // If it's not Presidential, we must send the State as an array of ObjectIds
+      const statesPayload = type === 'PRESIDENTIAL' ? [] : [selectedState];
+
       await electionsApi.create({
-        code, title, type, 
-        electionDate: new Date(date).toISOString()
+        code, 
+        title, 
+        type, 
+        electionDate: new Date(date).toISOString(),
+        states: statesPayload // Send the state!
       });
+      
       toast.success('Election created');
       setShowForm(false);
+      
+      // Reset form
+      setCode(''); setTitle(''); setDate(''); setSelectedState('');
+      
       listApi.refetch();
     } catch (err) {
       toast.error(err.response?.data?.error || 'Failed to create');
@@ -39,6 +53,7 @@ export default function ElectionsPage() {
   }
 
   async function handleStatus(id, status) {
+    if (!confirm(`Change status to ${status}?`)) return;
     try {
       await electionsApi.updateStatus(id, status);
       toast.success(`Election is now ${status}`);
@@ -81,8 +96,21 @@ export default function ElectionsPage() {
               <label className="label">Election Date</label>
               <input type="date" required className="input" value={date} onChange={e => setDate(e.target.value)} />
             </div>
+            
+            {/* NEW: Show State selector only if it's NOT Presidential */}
+            {type !== 'PRESIDENTIAL' && (
+              <div className="col-span-2">
+                <label className="label">State (Required for {type})</label>
+                <select required className="input" value={selectedState} onChange={e => setSelectedState(e.target.value)}>
+                  <option value="">Select a State…</option>
+                  {statesApi.data.map(s => (
+                    <option key={s._id} value={s._id}>{s.name}</option>
+                  ))}
+                </select>
+              </div>
+            )}
           </div>
-          <button type="submit" disabled={busy} className="btn-primary">
+          <button type="submit" disabled={busy || (type !== 'PRESIDENTIAL' && !selectedState)} className="btn-primary">
             {busy ? 'Creating…' : 'Create Election'}
           </button>
         </form>
@@ -99,7 +127,6 @@ export default function ElectionsPage() {
               <p className="mt-1 text-xs text-slate-500">{el.code} · {new Date(el.electionDate).toDateString()}</p>
             </div>
             
-            {/* New Dropdown to change status freely */}
             <div className="flex items-center gap-2">
               <label className="text-xs font-medium text-slate-500">Status:</label>
               <select 
