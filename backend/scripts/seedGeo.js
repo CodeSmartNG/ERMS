@@ -50,14 +50,7 @@ async function* readCsvRows(file) {
 }
 
 async function main() {
-  // ADD THIS LINE: Force delete the old partial CSV so it redownloads
-  if (fs.existsSync(CSV_PATH)) {
-    fs.unlinkSync(CSV_PATH);
-    console.log('🗑️ Deleted old CSV cache.');
-  }
-
   await mongoose.connect(env.MONGODB_URI);
-  
   console.log(`✅ MongoDB connected`);
   
   console.log('🧹 Clearing old geo data...');
@@ -99,7 +92,6 @@ async function main() {
       // ---- State ----
       let state = stateCache.get(stateName);
       if (!state) {
-        // Use try/catch so if it hits a duplicate, it continues instead of crashing
         try {
           state = await models.State.findOneAndUpdate(
             { code: stateCode },
@@ -117,7 +109,6 @@ async function main() {
           stats.states++;
           console.log(`[Seed]: Created State ${stateName} (${stateCode})`);
         } catch (err) {
-          // If it fails, skip this row entirely
           stats.skipped++;
           continue;
         }
