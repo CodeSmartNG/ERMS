@@ -9,6 +9,7 @@ const electionRoutes = require('./electionRoutes');
 const notificationRoutes = require('./notificationRoutes');
 const geoRoutes = require('./geoRoutes');
 const partyRoutes = require('./partyRoutes');
+const reportRoutes = require('./reportRoutes');
 
 const router = express.Router();
 
@@ -26,6 +27,7 @@ router.use('/notifications', notificationRoutes);
 router.use('/geo', geoRoutes);
 router.use('/parties', partyRoutes);
 router.use('/candidates', require('./candidateRoutes'));
+router.use('/reports', reportRoutes);
 
 
 module.exports = router;
