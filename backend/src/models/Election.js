@@ -61,9 +61,13 @@ electionSchema.pre('validate', function (next) {
   if (this.type === 'PRESIDENTIAL' && this.states?.length > 0) {
     return next(new Error('Presidential elections must not be scoped to specific states'));
   }
-  if (this.type !== 'PRESIDENTIAL' && (!this.states || this.states.length === 0)) {
+  
+  // NEW: Only require states if the election is NOT a DRAFT.
+  // This allows creating the election first, then assigning states later.
+  if (this.status !== 'DRAFT' && this.type !== 'PRESIDENTIAL' && (!this.states || this.states.length === 0)) {
     return next(new Error(`${this.type} election must specify at least one state`));
   }
+  
   next();
 });
 
