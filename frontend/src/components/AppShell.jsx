@@ -12,7 +12,7 @@ const NAV = [
   { to: '/admin/elections', label: 'Elections', icon: Vote },
   { to: '/admin/parties', label: 'Parties', icon: Flag },
   { to: '/admin/candidates', label: 'Candidates', icon: Users },
-  { to: '/admin/users', label: 'Create Agent', icon: UserPlus },
+  { to: '/admin/users', label: 'User Management', icon: UserPlus },
 ];
 
 export default function AppShell() {
