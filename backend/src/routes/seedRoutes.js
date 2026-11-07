@@ -7,24 +7,33 @@ const router = express.Router();
 router.get('/:electionId', async (req, res) => {
   try {
     const electionId = new mongoose.Types.ObjectId(req.params.electionId);
-    
-    // 1. Delete all old collation records so we start fresh
-    await models.Collation.deleteMany({ election: electionId });
-    console.log('[DEBUG] Cleared old collations.');
 
-    // 2. Run the rebuild
+    // 1. Fix the math on all verified results for this election
+    const results = await models.Result.find({ election: electionId, status: 'VERIFIED' });
+    for (const result of results) {
+      const partySum = result.partyVotes.reduce((sum, p) => sum + p.votes, 0);
+      result.totalValidVotes = partySum;
+      result.totalVotesCast = partySum + (result.rejectedBallots || 0);
+      if (result.totalVotesCast > result.accreditedVoters) {
+        result.accreditedVoters = result.totalVotesCast;
+      }
+      await result.save();
+    }
+
+    // 2. Wipe out the old broken collations
+    await models.Collation.deleteMany({ election: electionId });
+
+    // 3. Rebuild the dashboard data
     await collationService.rebuildAllForElection(electionId);
 
-    // 3. Check what got saved
-    const savedCollations = await models.Collation.find({ 
-      election: electionId, 
-      isCurrent: true 
-    }).lean();
+    // 4. Check if National was created
+    const national = await models.Collation.findOne({ election: electionId, level: 'NATIONAL', isCurrent: true }).lean();
 
     res.status(200).json({ 
       success: true, 
-      message: 'Rebuild complete. Cleared old data first.',
-      levelsSaved: savedCollations.map(c => c.level)
+      message: 'Database math fixed and collation rebuilt!',
+      nationalCreated: !!national,
+      nationalData: national
     });
 
   } catch (err) {
