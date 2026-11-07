@@ -28,10 +28,11 @@ function slugify(s) {
   return s.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 }
 
-// Forces "adamawa", "ADAMAWA", "Adamawa " into "Adamawa"
 function formatStateName(name) {
   if (!name) return '';
-  const lower = name.trim().toLowerCase();
+  // The crucial fix: strip out any hidden \r characters
+  const clean = name.replace(/\r/g, '').replace(/\n/g, '').trim();
+  const lower = clean.toLowerCase();
   return lower.charAt(0).toUpperCase() + lower.slice(1);
 }
 
@@ -40,12 +41,13 @@ async function* readCsvRows(file) {
   let headers = null;
   for await (const line of rl) {
     if (!line.trim()) continue;
-    const cells = line.split(',');
+    // Split by comma, and strip any \r from the cells
+    const cells = line.split(',').map(c => c.replace(/\r/g, '').trim());
     if (!headers) {
-      headers = cells.map((h) => h.trim().toLowerCase());
+      headers = cells.map((h) => h.toLowerCase());
       continue;
     }
-    yield Object.fromEntries(headers.map((h, idx) => [h, (cells[idx] || '').trim()]));
+    yield Object.fromEntries(headers.map((h, idx) => [h, (cells[idx] || '')]));
   }
 }
 
@@ -67,9 +69,9 @@ async function main() {
 
   try {
     for await (const row of readCsvRows(CSV_PATH)) {
-      const rawStateName = row.state?.trim();
-      const lgaName = row.lg?.trim();
-      const wardName = row.ward?.trim();
+      const rawStateName = row.state;
+      const lgaName = row.lg;
+      const wardName = row.ward;
       const puName = row.location || row.pu_name || `PU ${row.pu_code || row.code}`;
       const puCode = row.code || row.pu_code;
 
@@ -78,10 +80,8 @@ async function main() {
         continue;
       }
 
-      // Force title case (e.g. "adamawa" -> "Adamawa")
       const stateName = formatStateName(rawStateName);
 
-      // Check if state is in our allowed list
       if (!ALLOWED_STATES.includes(stateName.toLowerCase())) {
         stats.skipped++;
         continue;
@@ -89,7 +89,6 @@ async function main() {
 
       const stateCode = STATE_CODES[stateName] || stateName.slice(0, 2).toUpperCase();
 
-      // ---- State ----
       let state = stateCache.get(stateName);
       if (!state) {
         try {
@@ -114,7 +113,6 @@ async function main() {
         }
       }
 
-      // ---- LGA ----
       const lgaCode = `${stateCode}-${slugify(lgaName)}`;
       let lga = lgaCache.get(lgaCode);
       if (!lga) {
@@ -127,7 +125,6 @@ async function main() {
         stats.lgas++;
       }
 
-      // ---- Ward ----
       const wardCode = `${lgaCode}-${slugify(wardName)}`;
       let ward = wardCache.get(wardCode);
       if (!ward) {
@@ -140,7 +137,6 @@ async function main() {
         stats.wards++;
       }
 
-      // ---- PollingUnit ----
       const puPath = [stateCode, lgaCode, wardCode, puCode];
       await models.PollingUnit.updateOne(
         { code: puCode },
