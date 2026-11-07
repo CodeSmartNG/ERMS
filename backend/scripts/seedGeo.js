@@ -1,58 +1,150 @@
+
 #!/usr/bin/env node
+
 /**
- * Seeds the geo tree from Nigeria_polling_units.csv.
+ * CodeSmartNG ERMS - Nigeria Geographic Data Seeder
  *
- * Source: https://github.com/Emeka-Onwuepe/Polling_Units_in_Nigeria
- *   176,846 PUs | 8,787 wards | 774 LGAs | 37 states+FCT
+ * Seeds:
+ *  - 37 States (36 states + FCT)
+ *  - 774 LGAs
+ *  - Approximately 8,787 Wards
+ *  - Approximately 176,846 Polling Units
  *
- * Idempotent — re-runs upsert by stable `code`.
- * Derives path = [stateCode, lgaCode, wardCode, puCode] for every level.
+ * Source:
+ * https://github.com/Emeka-Onwuepe/Polling_Units_in_Nigeria
  *
  * Usage:
- *   node scripts/seedGeo.js                     # full seed
- *   node scripts/seedGeo.js --dry-run           # validate only, no writes
- *   node scripts/seedGeo.js --limit=1000        # seed first N rows (smoke test)
+ * node scripts/seedGeo.js
+ * node scripts/seedGeo.js --dry-run
+ * node scripts/seedGeo.js --limit=1000
+ *
+ * IMPORTANT:
+ * Run without --limit for the complete dataset.
  */
+
 require('dotenv').config();
+
 const fs = require('fs');
 const path = require('path');
 const readline = require('readline');
 const mongoose = require('mongoose');
+
 const env = require('../src/config/env');
 const models = require('../src/models');
 
-const CSV_PATH = path.resolve(__dirname, '../data/nigeria_polling_units.csv');
+const CSV_PATH = path.resolve(
+  __dirname,
+  '../data/nigeria_polling_units.csv'
+);
 
-// ---- args ----
+// =====================================================
+// COMMAND LINE ARGUMENTS
+// =====================================================
+
 const args = Object.fromEntries(
-  process.argv.slice(2).map((a) => {
-    const [k, v] = a.replace(/^--/, '').split('=');
-    return [k, v ?? true];
+  process.argv.slice(2).map((arg) => {
+    const [key, value] = arg
+      .replace(/^--/, '')
+      .split('=');
+
+    return [key, value ?? true];
   })
 );
-const DRY_RUN = args['dry-run'] === true || args['dry-run'] === 'true';
-const LIMIT = args.limit ? parseInt(args.limit, 10) : Infinity;
 
-// ---- zone lookup (INEC geopolitical zones) ----
+const DRY_RUN =
+  args['dry-run'] === true ||
+  args['dry-run'] === 'true';
+
+const LIMIT = args.limit
+  ? Number.parseInt(args.limit, 10)
+  : Infinity;
+
+if (
+  LIMIT !== Infinity &&
+  (!Number.isInteger(LIMIT) || LIMIT < 1)
+) {
+  console.error('Invalid --limit value.');
+  process.exit(1);
+}
+
+// =====================================================
+// GEOPOLITICAL ZONES
+// =====================================================
+
 const ZONE_BY_STATE = {
-  Abia: 'SE', Adamawa: 'NE', 'Akwa Ibom': 'SS', Anambra: 'SE', Bauchi: 'NE',
-  Bayelsa: 'SS', Benue: 'NC', Borno: 'NE', 'Cross River': 'SS', Delta: 'SS',
-  Ebonyi: 'SE', Edo: 'SS', Ekiti: 'SW', Enugu: 'SE', FCT: 'FCT',
-  Gombe: 'NE', Imo: 'SE', Jigawa: 'NW', Kaduna: 'NW', Kano: 'NW',
-  Katsina: 'NW', Kebbi: 'NW', Kogi: 'NC', Kwara: 'NC', Lagos: 'SW',
-  Nasarawa: 'NC', Niger: 'NC', Ogun: 'SW', Ondo: 'SW', Osun: 'SW',
-  Oyo: 'SW', Plateau: 'NC', Rivers: 'SS', Sokoto: 'NW', Taraba: 'NE',
-  Yobe: 'NE', Zamfara: 'NW',
+  Abia: 'SE',
+  Adamawa: 'NE',
+  'Akwa Ibom': 'SS',
+  Anambra: 'SE',
+  Bauchi: 'NE',
+  Bayelsa: 'SS',
+  Benue: 'NC',
+  Borno: 'NE',
+  'Cross River': 'SS',
+  Delta: 'SS',
+  Ebonyi: 'SE',
+  Edo: 'SS',
+  Ekiti: 'SW',
+  Enugu: 'SE',
+  FCT: 'FCT',
+  Gombe: 'NE',
+  Imo: 'SE',
+  Jigawa: 'NW',
+  Kaduna: 'NW',
+  Kano: 'NW',
+  Katsina: 'NW',
+  Kebbi: 'NW',
+  Kogi: 'NC',
+  Kwara: 'NC',
+  Lagos: 'SW',
+  Nasarawa: 'NC',
+  Niger: 'NC',
+  Ogun: 'SW',
+  Ondo: 'SW',
+  Osun: 'SW',
+  Oyo: 'SW',
+  Plateau: 'NC',
+  Rivers: 'SS',
+  Sokoto: 'NW',
+  Taraba: 'NE',
+  Yobe: 'NE',
+  Zamfara: 'NW',
 };
 
-function slugify(s) {
-  return s.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+// =====================================================
+// HELPERS
+// =====================================================
+
+function slugify(value) {
+  return String(value || '')
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '');
 }
 
 function stateCodeFromRow(state, csvCode) {
-  // CSV state_code is the INEC 2-letter-ish code; fall back to slug if missing.
-  return (csvCode || '').trim().toUpperCase() || state.slice(0, 2).toUpperCase();
+  const code = String(csvCode || '').trim().toUpperCase();
+
+  if (code) return code;
+
+  return String(state || '')
+    .trim()
+    .slice(0, 2)
+    .toUpperCase();
 }
+
+function normalizeName(value) {
+  return String(value || '').trim();
+}
+
+function getRequiredRowValue(row, key) {
+  return normalizeName(row[key]);
+}
+
+// =====================================================
+// CSV READER
+// =====================================================
 
 async function* readCsvRows(file) {
   const rl = readline.createInterface({
@@ -61,196 +153,513 @@ async function* readCsvRows(file) {
   });
 
   let headers = null;
-  let i = 0;
+  let rowNumber = 0;
+
   for await (const line of rl) {
     if (!line.trim()) continue;
-    // Naive CSV split (dataset has no quoted commas in the fields we use).
+
+    // This dataset is expected to have no quoted commas
+    // in the columns used by this script.
     const cells = line.split(',');
+
     if (!headers) {
-      headers = cells.map((h) => h.trim());
+      headers = cells.map((header) =>
+        header.replace(/^\uFEFF/, '').trim()
+      );
+
+      const requiredHeaders = [
+        'state',
+        'lg',
+        'ward',
+        'code',
+      ];
+
+      const missing = requiredHeaders.filter(
+        (header) => !headers.includes(header)
+      );
+
+      if (missing.length) {
+        throw new Error(
+          `CSV is missing required columns: ${missing.join(', ')}`
+        );
+      }
+
       continue;
     }
-    const row = Object.fromEntries(headers.map((h, idx) => [h, (cells[idx] || '').trim()]));
-    yield row;
-    if (++i >= LIMIT) break;
+
+    const row = {};
+
+    headers.forEach((header, index) => {
+      row[header] = String(cells[index] || '').trim();
+    });
+
+    rowNumber++;
+
+    yield {
+      ...row,
+      __rowNumber: rowNumber,
+    };
+
+    if (rowNumber >= LIMIT) break;
   }
 }
 
+// =====================================================
+// MAIN SEED FUNCTION
+// =====================================================
+
 async function main() {
   if (!fs.existsSync(CSV_PATH)) {
-    console.error(`❌ CSV not found at ${CSV_PATH}`);
-    console.error('   Download it first (see README section 1).');
-    process.exit(1);
+    throw new Error(
+      `CSV file not found: ${CSV_PATH}`
+    );
   }
 
+  if (!env.MONGODB_URI) {
+    throw new Error('MONGODB_URI is missing from your environment.');
+  }
+
+  console.log('\n========================================');
+  console.log(' CodeSmartNG ERMS - GEO DATA SEEDER');
+  console.log('========================================\n');
+
+  console.log(`CSV file: ${CSV_PATH}`);
+  console.log(`Mode: ${DRY_RUN ? 'DRY RUN' : 'DATABASE WRITE'}`);
+  console.log(
+    `Limit: ${LIMIT === Infinity ? 'FULL DATASET' : LIMIT}`
+  );
+
   await mongoose.connect(env.MONGODB_URI);
-  console.log(`✅ MongoDB connected${DRY_RUN ? ' (DRY RUN — no writes)' : ''}`);
-  console.log(`📄 Reading ${CSV_PATH}${LIMIT !== Infinity ? ` (limit ${LIMIT})` : ''}\n`);
 
-  // In-memory caches to avoid redundant upserts within the same run.
-  const stateCache = new Map();  // stateName -> { _id, code, slug }
-  const lgaCache = new Map();    // `${stateCode}:${lgaName}` -> { _id, code }
-  const wardCache = new Map();   // `${lgaCode}:${wardName}` -> { _id, code }
+  console.log('\nMongoDB connected successfully.\n');
 
-  let stats = { rows: 0, states: 0, lgas: 0, wards: 0, pus: 0, skipped: 0 };
+  // ---------------------------------------------------
+  // CACHES
+  // ---------------------------------------------------
+
+  const stateCache = new Map();
+  const lgaCache = new Map();
+  const wardCache = new Map();
+
+  // ---------------------------------------------------
+  // STATISTICS
+  // ---------------------------------------------------
+
+  const stats = {
+    rows: 0,
+    skipped: 0,
+    states: new Set(),
+    lgas: new Set(),
+    wards: new Set(),
+    pus: 0,
+  };
+
+  // ---------------------------------------------------
+  // PROCESS CSV
+  // ---------------------------------------------------
 
   for await (const row of readCsvRows(CSV_PATH)) {
     stats.rows++;
 
-    const stateName = row.state;
-    const lgaName = row.lg;
-    const wardName = row.ward;
-    const puName = row.Location || row.pu_name || `PU ${row.pu_code}`;
-    const puCode = row.code;
-    const stateCode = stateCodeFromRow(stateName, row.state_code);
+    const stateName = getRequiredRowValue(row, 'state');
+    const lgaName = getRequiredRowValue(row, 'lg');
+    const wardName = getRequiredRowValue(row, 'ward');
 
-    if (!stateName || !lgaName || !wardName || !puCode) {
+    const puName =
+      getRequiredRowValue(row, 'Location') ||
+      getRequiredRowValue(row, 'pu_name') ||
+      `Polling Unit ${row.code}`;
+
+    const puCode = getRequiredRowValue(row, 'code');
+
+    const stateCode = stateCodeFromRow(
+      stateName,
+      row.state_code
+    );
+
+    // -------------------------------------------------
+    // VALIDATE ROW
+    // -------------------------------------------------
+
+    if (
+      !stateName ||
+      !lgaName ||
+      !wardName ||
+      !puCode ||
+      !stateCode
+    ) {
       stats.skipped++;
+
+      console.warn(
+        `Skipped invalid CSV row ${row.__rowNumber}`
+      );
+
       continue;
     }
 
-    // ---- State ----
+    // -------------------------------------------------
+    // STATE
+    // -------------------------------------------------
+
     let state = stateCache.get(stateName);
+
     if (!state) {
+      const stateData = {
+        name: stateName,
+        slug: slugify(stateName),
+        zone: ZONE_BY_STATE[stateName] || 'NC',
+        isActive: true,
+      };
+
       if (!DRY_RUN) {
         state = await models.State.findOneAndUpdate(
           { code: stateCode },
           {
+            $set: stateData,
             $setOnInsert: {
               code: stateCode,
-              name: stateName,
-              slug: slugify(stateName),
-              zone: ZONE_BY_STATE[stateName] || 'NC',
-              isActive: true,
             },
           },
-          { upsert: true, new: true, lean: true }
+          {
+            upsert: true,
+            new: true,
+            lean: true,
+            runValidators: true,
+          }
         );
+
+        if (!state) {
+          throw new Error(
+            `Could not create or update state: ${stateName}`
+          );
+        }
       } else {
-        state = { _id: new mongoose.Types.ObjectId(), code: stateCode };
+        state = {
+          _id: new mongoose.Types.ObjectId(),
+          code: stateCode,
+          name: stateName,
+        };
       }
+
       stateCache.set(stateName, state);
-      stats.states++;
+      stats.states.add(stateName);
     }
 
-    // ---- LGA ----
-    // LGA codes in the CSV are NOT globally unique (44 unique values across 774 LGAs).
-    // Build a stable compound code: ${stateCode}-${lgaSlug}
-    const lgaCode = `${stateCode}-${slugify(lgaName)}`;
-    const lgaKey = `${stateCode}:${lgaName}`;
+    // -------------------------------------------------
+    // LGA
+    // -------------------------------------------------
+
+    const lgaCode =
+      `${stateCode}-${slugify(lgaName)}`;
+
+    const lgaKey =
+      `${stateCode}:${lgaName}`;
+
     let lga = lgaCache.get(lgaKey);
+
     if (!lga) {
+      const lgaData = {
+        name: lgaName,
+        state: state._id,
+        stateCode,
+        isActive: true,
+      };
+
       if (!DRY_RUN) {
         lga = await models.LGA.findOneAndUpdate(
           { code: lgaCode },
           {
+            $set: lgaData,
             $setOnInsert: {
               code: lgaCode,
-              name: lgaName,
-              state: state._id,
-              stateCode,
-              isActive: true,
             },
           },
-          { upsert: true, new: true, lean: true }
+          {
+            upsert: true,
+            new: true,
+            lean: true,
+            runValidators: true,
+          }
         );
+
+        if (!lga) {
+          throw new Error(
+            `Could not create or update LGA: ${lgaName}`
+          );
+        }
       } else {
-        lga = { _id: new mongoose.Types.ObjectId(), code: lgaCode };
+        lga = {
+          _id: new mongoose.Types.ObjectId(),
+          code: lgaCode,
+        };
       }
+
       lgaCache.set(lgaKey, lga);
-      stats.lgas++;
+      stats.lgas.add(lgaCode);
     }
 
-    // ---- Ward ----
-    const wardCode = `${lgaCode}-${slugify(wardName)}`;
-    const wardKey = `${lgaCode}:${wardName}`;
+    // -------------------------------------------------
+    // WARD
+    // -------------------------------------------------
+
+    const wardCode =
+      `${lgaCode}-${slugify(wardName)}`;
+
+    const wardKey =
+      `${lgaCode}:${wardName}`;
+
     let ward = wardCache.get(wardKey);
+
     if (!ward) {
+      const wardData = {
+        name: wardName,
+        lga: lga._id,
+        state: state._id,
+        lgaCode,
+        stateCode,
+        isActive: true,
+      };
+
       if (!DRY_RUN) {
         ward = await models.Ward.findOneAndUpdate(
           { code: wardCode },
           {
+            $set: wardData,
             $setOnInsert: {
               code: wardCode,
-              name: wardName,
-              lga: lga._id,
-              state: state._id,
-              lgaCode,
-              stateCode,
-              isActive: true,
             },
           },
-          { upsert: true, new: true, lean: true }
+          {
+            upsert: true,
+            new: true,
+            lean: true,
+            runValidators: true,
+          }
         );
+
+        if (!ward) {
+          throw new Error(
+            `Could not create or update ward: ${wardName}`
+          );
+        }
       } else {
-        ward = { _id: new mongoose.Types.ObjectId(), code: wardCode };
+        ward = {
+          _id: new mongoose.Types.ObjectId(),
+          code: wardCode,
+        };
       }
+
       wardCache.set(wardKey, ward);
-      stats.wards++;
+      stats.wards.add(wardCode);
     }
 
-    // ---- PollingUnit ----
+    // -------------------------------------------------
+    // POLLING UNIT
+    // -------------------------------------------------
+
     if (!DRY_RUN) {
-      const puPath = [stateCode, lgaCode, wardCode, puCode];
-      await models.PollingUnit.updateOne(
+      const puPath = [
+        stateCode,
+        lgaCode,
+        wardCode,
+        puCode,
+      ];
+
+      const puData = {
+        name: puName,
+        ward: ward._id,
+        lga: lga._id,
+        state: state._id,
+
+        wardCode,
+        lgaCode,
+        stateCode,
+
+        path: puPath,
+
+        ancestors: {
+          state: state._id,
+          lga: lga._id,
+          ward: ward._id,
+        },
+
+        address: row.Location || null,
+        isActive: true,
+      };
+
+      const result = await models.PollingUnit.updateOne(
         { code: puCode },
         {
+          $set: puData,
           $setOnInsert: {
             code: puCode,
-            name: puName,
-            ward: ward._id,
-            lga: lga._id,
-            state: state._id,
-            wardCode,
-            lgaCode,
-            stateCode,
-            path: puPath,
-            ancestors: { state: state._id, lga: lga._id, ward: ward._id },
-            address: row.Location || null,
-            registeredVoters: 0, // not in dataset; update via separate import if available
-            isActive: true,
+            registeredVoters: 0,
           },
         },
-        { upsert: true }
+        {
+          upsert: true,
+          runValidators: true,
+        }
       );
+
+      if (!result.acknowledged) {
+        throw new Error(
+          `Failed to save polling unit: ${puCode}`
+        );
+      }
     }
+
     stats.pus++;
 
+    // -------------------------------------------------
+    // PROGRESS
+    // -------------------------------------------------
+
     if (stats.rows % 10000 === 0) {
-      console.log(`  ...${stats.rows.toLocaleString()} rows | ${stats.lgas} LGAs | ${stats.wards} wards | ${stats.pus.toLocaleString()} PUs`);
+      console.log(
+        `${stats.rows.toLocaleString()} rows processed | ` +
+        `${stats.states.size} states | ` +
+        `${stats.lgas.size} LGAs | ` +
+        `${stats.wards.size} wards | ` +
+        `${stats.pus.toLocaleString()} polling units`
+      );
     }
   }
 
-  console.log('\n📊 Summary:');
-  console.log(`   Rows read     : ${stats.rows.toLocaleString()}`);
-  console.log(`   States seen   : ${stats.states}`);
-  console.log(`   LGAs seen     : ${stats.lgas.toLocaleString()}`);
-  console.log(`   Wards seen    : ${stats.wards.toLocaleString()}`);
-  console.log(`   PUs seen      : ${stats.pus.toLocaleString()}`);
-  console.log(`   Rows skipped  : ${stats.skipped}`);
+  // ===================================================
+  // CSV SUMMARY
+  // ===================================================
 
-  if (!DRY_RUN) {
-    console.log('\n🔍 Verifying counts in DB...');
-    const [stateCount, lgaCount, wardCount, puCount] = await Promise.all([
-      models.State.countDocuments(),
-      models.LGA.countDocuments(),
-      models.Ward.countDocuments(),
-      models.PollingUnit.countDocuments(),
-    ]);
-    console.log(`   State        : ${stateCount} (expected 37)`);
-    console.log(`   LGA          : ${lgaCount} (expected 774)`);
-    console.log(`   Ward         : ${wardCount} (expected ~8,787)`);
-    console.log(`   PollingUnit  : ${puCount} (expected ~176,846)`);
+  console.log('\n========================================');
+  console.log(' CSV PROCESSING SUMMARY');
+  console.log('========================================');
 
-    if (stateCount !== 37) console.warn('⚠️  State count mismatch — check zone mapping / CSV');
-    if (lgaCount !== 774) console.warn('⚠️  LGA count mismatch — some LGAs may share names across states');
+  console.log(`Rows read: ${stats.rows.toLocaleString()}`);
+  console.log(`States seen: ${stats.states.size}`);
+  console.log(`LGAs seen: ${stats.lgas.size}`);
+  console.log(`Wards seen: ${stats.wards.size}`);
+  console.log(`Polling units seen: ${stats.pus.toLocaleString()}`);
+  console.log(`Rows skipped: ${stats.skipped}`);
+
+  console.log('\nStates found in CSV:');
+
+  for (const name of [...stats.states].sort()) {
+    console.log(` - ${name}`);
   }
 
-  console.log('\n✅ Done.');
-  await mongoose.disconnect();
+  if (DRY_RUN) {
+    console.log('\nDRY RUN completed. No database records were changed.');
+    return;
+  }
+
+  // ===================================================
+  // VERIFY DATABASE COUNTS
+  // ===================================================
+
+  console.log('\n========================================');
+  console.log(' DATABASE VERIFICATION');
+  console.log('========================================');
+
+  const [
+    allStates,
+    activeStates,
+    inactiveStates,
+    allLGAs,
+    activeLGAs,
+    allWards,
+    activeWards,
+    allPUs,
+    activePUs,
+  ] = await Promise.all([
+    models.State.countDocuments(),
+    models.State.countDocuments({ isActive: true }),
+    models.State.countDocuments({ isActive: false }),
+
+    models.LGA.countDocuments(),
+    models.LGA.countDocuments({ isActive: true }),
+
+    models.Ward.countDocuments(),
+    models.Ward.countDocuments({ isActive: true }),
+
+    models.PollingUnit.countDocuments(),
+    models.PollingUnit.countDocuments({ isActive: true }),
+  ]);
+
+  console.log(`All states: ${allStates}`);
+  console.log(`Active states: ${activeStates}`);
+  console.log(`Inactive states: ${inactiveStates}`);
+
+  console.log(`All LGAs: ${allLGAs}`);
+  console.log(`Active LGAs: ${activeLGAs}`);
+
+  console.log(`All wards: ${allWards}`);
+  console.log(`Active wards: ${activeWards}`);
+
+  console.log(`All polling units: ${allPUs}`);
+  console.log(`Active polling units: ${activePUs}`);
+
+  // ===================================================
+  // DISPLAY STATES IN DATABASE
+  // ===================================================
+
+  const savedStates = await models.State.find()
+    .select('name code isActive zone')
+    .sort({ name: 1 })
+    .lean();
+
+  console.log('\nStates currently stored in MongoDB:');
+
+  for (const state of savedStates) {
+    console.log(
+      `${state.isActive ? '[ACTIVE]' : '[INACTIVE]'} ` +
+      `${state.name} (${state.code})`
+    );
+  }
+
+  // ===================================================
+  // FINAL CHECKS
+  // ===================================================
+
+  console.log('\n========================================');
+  console.log(' FINAL CHECK');
+  console.log('========================================');
+
+  if (activeStates === 37) {
+    console.log('SUCCESS: All 37 states/FCT are active.');
+  } else {
+    console.warn(
+      `WARNING: Expected 37 active states, found ${activeStates}.`
+    );
+  }
+
+  if (activeLGAs !== 774) {
+    console.warn(
+      `WARNING: Expected 774 active LGAs, found ${activeLGAs}.`
+    );
+  }
+
+  if (stats.states.size < 37) {
+    console.warn(
+      'The CSV did not contain all 37 states/FCT. ' +
+      'Check the source CSV file and its contents.'
+    );
+  }
+
+  console.log('\nGeo seeding finished.');
 }
 
-main().catch((err) => {
-  console.error('❌ Seed failed:', err);
-  process.exit(1);
-});
+// =====================================================
+// START AND CLEANUP
+// =====================================================
+
+main()
+  .catch((error) => {
+    console.error('\nGEO SEED FAILED:');
+    console.error(error);
+    process.exitCode = 1;
+  })
+  .finally(async () => {
+    if (mongoose.connection.readyState !== 0) {
+      await mongoose.disconnect();
+    }
+  });
