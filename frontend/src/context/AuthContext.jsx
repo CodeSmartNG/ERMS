@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useState, useCallback } from 'react';
-import api, { authApi, tokens } from '@/services/api';
+import { authApi, tokens } from '@/services/api';
+import { clearQueue } from '@/services/offlineQueue'; // <--- ADD THIS IMPORT
 
 const AuthContext = createContext(null);
 
@@ -31,7 +32,10 @@ export function AuthProvider({ children }) {
 
   const logout = useCallback(async () => {
     try { await authApi.logout(tokens.refresh); } catch { /* best-effort */ }
+    
+    // Clear tokens and the local offline queue
     tokens.clear();
+    await clearQueue(); // <--- ADD THIS LINE
     setUser(null);
   }, []);
 
