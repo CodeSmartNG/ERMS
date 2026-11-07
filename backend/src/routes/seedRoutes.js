@@ -10,6 +10,7 @@ router.get('/:electionId', async (req, res) => {
 
     // 1. Fix the math on all verified results for this election
     const results = await models.Result.find({ election: electionId, status: 'VERIFIED' });
+    
     for (const result of results) {
       const partySum = result.partyVotes.reduce((sum, p) => sum + p.votes, 0);
       result.totalValidVotes = partySum;
