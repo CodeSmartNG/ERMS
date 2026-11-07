@@ -1,4 +1,3 @@
-
 const mongoose = require('mongoose');
 const crypto = require('crypto');
 
@@ -14,15 +13,8 @@ const {
 } = models;
 
 const VERIFIED_STATUS = 'VERIFIED';
+const REPORTED_STATUSES = ['SUBMITTED', 'VERIFIED', 'FLAGGED', 'REJECTED'];
 
-const REPORTED_STATUSES = [
-  'SUBMITTED',
-  'VERIFIED',
-  'FLAGGED',
-  'REJECTED',
-];
-
-// Prevent simultaneous rebuilds for the same election.
 const electionLocks = new Map();
 
 /* =====================================================
@@ -33,7 +25,6 @@ function toObjectId(id) {
   if (!id || !mongoose.Types.ObjectId.isValid(id)) {
     throw new Error('Invalid MongoDB ObjectId');
   }
-
   return new mongoose.Types.ObjectId(id);
 }
 
@@ -42,74 +33,45 @@ function round(value) {
 }
 
 function sumField(items, field) {
-  return items.reduce(
-    (total, item) => total + (Number(item[field]) || 0),
-    0
-  );
+  return items.reduce((total, item) => total + (Number(item[field]) || 0), 0);
 }
 
 function createSourceHash(hashes) {
-  const sorted = hashes
-    .filter(Boolean)
-    .map(String)
-    .sort();
-
-  return crypto
-    .createHash('sha256')
-    .update(sorted.join('|'))
-    .digest('hex');
+  const sorted = hashes.filter(Boolean).map(String).sort();
+  return crypto.createHash('sha256').update(sorted.join('|')).digest('hex');
 }
 
 function normalizePartyTotals(items) {
   const totals = new Map();
-
   for (const item of items || []) {
-    const partyId = item.party
-      ? String(item.party._id || item.party)
-      : null;
-
+    const partyId = item.party ? String(item.party._id || item.party) : null;
     if (!partyId) continue;
 
-    const partyCode = String(
-      item.partyCode || ''
-    ).toUpperCase();
-
+    const partyCode = String(item.partyCode || '').toUpperCase();
     const key = partyId;
 
     if (!totals.has(key)) {
-      totals.set(key, {
-        party: partyId,
-        partyCode,
-        votes: 0,
-      });
+      totals.set(key, { party: partyId, partyCode, votes: 0 });
     }
-
     totals.get(key).votes += Number(item.votes) || 0;
   }
 
   return Array.from(totals.values())
-    .map((item) => ({
-      ...item,
-      votes: Math.round(item.votes),
-    }))
+    .map((item) => ({ ...item, votes: Math.round(item.votes) }))
     .sort((a, b) => b.votes - a.votes);
 }
 
 function buildLeadingParty(partyTotals, totalValidVotes) {
-  if (!partyTotals || !partyTotals.length) {
-    return null;
-  }
+  if (!partyTotals || !partyTotals.length) return null;
 
   const sorted = [...partyTotals].sort((a, b) => b.votes - a.votes);
   const winner = sorted[0];
 
   return {
     party: winner.party,
-    partyCode: winner.partyCode, // <--- MUST BE partyCode
+    partyCode: winner.partyCode, 
     votes: winner.votes,
-    percentage: totalValidVotes > 0
-      ? round((winner.votes / totalValidVotes) * 100)
-      : 0,
+    percentage: totalValidVotes > 0 ? round((winner.votes / totalValidVotes) * 100) : 0,
   };
 }
 
@@ -123,32 +85,22 @@ function buildCommon(data, pollingUnitsTotal) {
     totalVotesCast: Number(data.totalVotesCast) || 0,
     totalValidVotes: Number(data.totalValidVotes) || 0,
     rejectedBallots: Number(data.rejectedBallots) || 0,
-
     pollingUnitsTotal: Number(pollingUnitsTotal) || 0,
     pollingUnitsReported: reported,
     pollingUnitsVerified: verified,
-
-    reportingPercentage: pollingUnitsTotal > 0
-      ? round((reported / pollingUnitsTotal) * 100)
-      : 0,
+    reportingPercentage: pollingUnitsTotal > 0 ? round((reported / pollingUnitsTotal) * 100) : 0,
   };
 }
 
 function combineCollations(collations, pollingUnitsTotal) {
   const partyItems = [];
-
   for (const collation of collations) {
     for (const party of collation.partyTotals || []) {
-      partyItems.push({
-        party: party.party,
-        partyCode: party.partyCode,
-        votes: party.votes,
-      });
+      partyItems.push({ party: party.party, partyCode: party.partyCode, votes: party.votes });
     }
   }
 
   const partyTotals = normalizePartyTotals(partyItems);
-
   const registeredVoters = sumField(collations, 'registeredVoters');
   const accreditedVoters = sumField(collations, 'accreditedVoters');
   const totalVotesCast = sumField(collations, 'totalVotesCast');
@@ -157,358 +109,129 @@ function combineCollations(collations, pollingUnitsTotal) {
   const pollingUnitsReported = sumField(collations, 'pollingUnitsReported');
   const pollingUnitsVerified = sumField(collations, 'pollingUnitsVerified');
   const sourceCount = sumField(collations, 'sourceCount');
-
   const hashes = collations.map((item) => item.sourceHash);
 
   return {
     partyTotals,
-    ...buildCommon(
-      {
-        registeredVoters,
-        accreditedVoters,
-        totalVotesCast,
-        totalValidVotes,
-        rejectedBallots,
-        pollingUnitsReported,
-        pollingUnitsVerified,
-      },
-      pollingUnitsTotal
-    ),
+    ...buildCommon({ registeredVoters, accreditedVoters, totalVotesCast, totalValidVotes, rejectedBallots, pollingUnitsReported, pollingUnitsVerified }, pollingUnitsTotal),
     sourceHash: createSourceHash(hashes),
-    sourceCount, // <--- ADDED THIS LINE
+    sourceCount, // FIXED: Added sourceCount
   };
 }
 
 async function withElectionLock(electionId, callback) {
   const key = String(electionId);
-
   const previous = electionLocks.get(key) || Promise.resolve();
-
-  const current = previous
-    .catch(() => {})
-    .then(callback);
-
+  const current = previous.catch(() => {}).then(callback);
   electionLocks.set(key, current);
-
   try {
     return await current;
   } finally {
-    if (electionLocks.get(key) === current) {
-      electionLocks.delete(key);
-    }
+    if (electionLocks.get(key) === current) electionLocks.delete(key);
   }
 }
 
 /* =====================================================
-   SOURCE DATA: WARD
+   SOURCE DATA
 ===================================================== */
 
 async function computeWard(electionId, wardId) {
   const ward = await Ward.findById(wardId).lean();
-
-  if (!ward) {
-    throw new Error(`Ward not found: ${wardId}`);
-  }
-
+  if (!ward) throw new Error(`Ward not found: ${wardId}`);
   const lga = await LGA.findById(ward.lga).lean();
-
-  if (!lga) {
-    throw new Error(`LGA not found for ward: ${wardId}`);
-  }
-
+  if (!lga) throw new Error(`LGA not found for ward: ${wardId}`);
   const state = await State.findById(lga.state).lean();
+  if (!state) throw new Error(`State not found for ward: ${wardId}`);
 
-  if (!state) {
-    throw new Error(`State not found for ward: ${wardId}`);
-  }
+  const verifiedResults = await Result.find({ election: electionId, ward: wardId, isCurrent: true, status: VERIFIED_STATUS })
+    .select('registeredVoters accreditedVoters totalVotesCast totalValidVotes rejectedBallots partyVotes hash').lean();
 
-  // Only VERIFIED current results contribute to vote totals.
-  const verifiedResults = await Result.find({
-    election: electionId,
-    ward: wardId,
-    isCurrent: true,
-    status: VERIFIED_STATUS,
-  })
-    .select(
-      'registeredVoters accreditedVoters totalVotesCast totalValidVotes rejectedBallots partyVotes hash'
-    )
-    .lean();
-
-  // All current submitted reports count towards reported coverage.
-  const pollingUnitsReported = await Result.countDocuments({
-    election: electionId,
-    ward: wardId,
-    isCurrent: true,
-    status: { $in: REPORTED_STATUSES },
-  });
-
+  const pollingUnitsReported = await Result.countDocuments({ election: electionId, ward: wardId, isCurrent: true, status: { $in: REPORTED_STATUSES } });
   const pollingUnitsVerified = verifiedResults.length;
+  const pollingUnitsTotal = await PollingUnit.countDocuments({ ward: wardId, isActive: true });
 
-  const pollingUnitsTotal = await PollingUnit.countDocuments({
-    ward: wardId,
-    isActive: true,
-  });
-
-  if (!verifiedResults.length) {
-    return null;
-  }
+  if (!verifiedResults.length) return null;
 
   const partyItems = [];
-
   for (const result of verifiedResults) {
     for (const item of result.partyVotes || []) {
-      partyItems.push({
-        party: item.party,
-        partyCode: item.partyCode,
-        votes: item.votes,
-      });
+      partyItems.push({ party: item.party, partyCode: item.partyCode, votes: item.votes });
     }
   }
 
   const partyTotals = normalizePartyTotals(partyItems);
-
-  const registeredVoters = sumField(
-    verifiedResults,
-    'registeredVoters'
-  );
-
-  const accreditedVoters = sumField(
-    verifiedResults,
-    'accreditedVoters'
-  );
-
-  const totalVotesCast = sumField(
-    verifiedResults,
-    'totalVotesCast'
-  );
-
-  const totalValidVotes = sumField(
-    verifiedResults,
-    'totalValidVotes'
-  );
-
-  const rejectedBallots = sumField(
-    verifiedResults,
-    'rejectedBallots'
-  );
-
-  const sourceHash = createSourceHash(
-    verifiedResults.map((item) => item.hash)
-  );
+  const registeredVoters = sumField(verifiedResults, 'registeredVoters');
+  const accreditedVoters = sumField(verifiedResults, 'accreditedVoters');
+  const totalVotesCast = sumField(verifiedResults, 'totalVotesCast');
+  const totalValidVotes = sumField(verifiedResults, 'totalValidVotes');
+  const rejectedBallots = sumField(verifiedResults, 'rejectedBallots');
+  const sourceHash = createSourceHash(verifiedResults.map((item) => item.hash));
 
   return {
-    election: electionId,
-    level: 'WARD',
-    entity: ward._id,
-    entityCode: ward.code,
-    entityName: ward.name,
-
-    stateCode: state.code,
-    stateName: state.name,
-
-    lgaCode: lga.code,
-    lgaName: lga.name,
-
-    wardCode: ward.code,
-    wardName: ward.name,
-
-    partyTotals,
-
-    ...buildCommon(
-      {
-        registeredVoters,
-        accreditedVoters,
-        totalVotesCast,
-        totalValidVotes,
-        rejectedBallots,
-        pollingUnitsReported,
-        pollingUnitsVerified,
-      },
-      pollingUnitsTotal
-    ),
-
-    sourceHash,
-    sourceCount: verifiedResults.length,
+    election: electionId, level: 'WARD', entity: ward._id, entityCode: ward.code, entityName: ward.name,
+    stateCode: state.code, stateName: state.name, lgaCode: lga.code, lgaName: lga.name, wardCode: ward.code, wardName: ward.name,
+    partyTotals, ...buildCommon({ registeredVoters, accreditedVoters, totalVotesCast, totalValidVotes, rejectedBallots, pollingUnitsReported, pollingUnitsVerified }, pollingUnitsTotal),
+    sourceHash, sourceCount: verifiedResults.length,
   };
 }
-
-/* =====================================================
-   SOURCE DATA: LGA
-===================================================== */
 
 async function computeLGA(electionId, lgaId) {
   const lga = await LGA.findById(lgaId).lean();
-
-  if (!lga) {
-    throw new Error(`LGA not found: ${lgaId}`);
-  }
-
+  if (!lga) throw new Error(`LGA not found: ${lgaId}`);
   const state = await State.findById(lga.state).lean();
+  if (!state) throw new Error(`State not found for LGA: ${lgaId}`);
 
-  if (!state) {
-    throw new Error(`State not found for LGA: ${lgaId}`);
-  }
+  const wardCollations = await Collation.find({ election: electionId, level: 'WARD', lgaCode: lga.code, stateCode: state.code, isCurrent: true }).lean();
+  if (!wardCollations.length) return null;
 
-  const wardCollations = await Collation.find({
-    election: electionId,
-    level: 'WARD',
-    lgaCode: lga.code,
-    stateCode: state.code,
-    isCurrent: true,
-  }).lean();
-
-  if (!wardCollations.length) {
-    return null;
-  }
-
-  const pollingUnitsTotal = await PollingUnit.countDocuments({
-    lga: lgaId,
-    isActive: true,
-  });
-
-  const common = combineCollations(
-    wardCollations,
-    pollingUnitsTotal
-  );
+  const pollingUnitsTotal = await PollingUnit.countDocuments({ lga: lgaId, isActive: true });
+  const common = combineCollations(wardCollations, pollingUnitsTotal);
 
   return {
-    election: electionId,
-    level: 'LGA',
-    entity: lga._id,
-    entityCode: lga.code,
-    entityName: lga.name,
-
-    stateCode: state.code,
-    stateName: state.name,
-
-    lgaCode: lga.code,
-    lgaName: lga.name,
-
-    wardCode: null,
-    wardName: null,
-
+    election: electionId, level: 'LGA', entity: lga._id, entityCode: lga.code, entityName: lga.name,
+    stateCode: state.code, stateName: state.name, lgaCode: lga.code, lgaName: lga.name, wardCode: null, wardName: null,
     ...common,
   };
 }
-
-/* =====================================================
-   SOURCE DATA: STATE
-===================================================== */
 
 async function computeState(electionId, stateId) {
   const state = await State.findById(stateId).lean();
+  if (!state) throw new Error(`State not found: ${stateId}`);
 
-  if (!state) {
-    throw new Error(`State not found: ${stateId}`);
-  }
+  const lgaCollations = await Collation.find({ election: electionId, level: 'LGA', stateCode: state.code, isCurrent: true }).lean();
+  if (!lgaCollations.length) return null;
 
-  const lgaCollations = await Collation.find({
-    election: electionId,
-    level: 'LGA',
-    stateCode: state.code,
-    isCurrent: true,
-  }).lean();
-
-  if (!lgaCollations.length) {
-    return null;
-  }
-
-  const pollingUnitsTotal = await PollingUnit.countDocuments({
-    state: stateId,
-    isActive: true,
-  });
-
-  const common = combineCollations(
-    lgaCollations,
-    pollingUnitsTotal
-  );
+  const pollingUnitsTotal = await PollingUnit.countDocuments({ state: stateId, isActive: true });
+  const common = combineCollations(lgaCollations, pollingUnitsTotal);
 
   return {
-    election: electionId,
-    level: 'STATE',
-    entity: state._id,
-    entityCode: state.code,
-    entityName: state.name,
-
-    stateCode: state.code,
-    stateName: state.name,
-
-    lgaCode: null,
-    lgaName: null,
-
-    wardCode: null,
-    wardName: null,
-
+    election: electionId, level: 'STATE', entity: state._id, entityCode: state.code, entityName: state.name,
+    stateCode: state.code, stateName: state.name, lgaCode: null, lgaName: null, wardCode: null, wardName: null,
     ...common,
   };
 }
-
-/* =====================================================
-   SOURCE DATA: NATIONAL
-===================================================== */
 
 async function computeNational(electionId) {
-  const stateCollations = await Collation.find({
-    election: electionId,
-    level: 'STATE',
-    isCurrent: true,
-  }).lean();
+  const stateCollations = await Collation.find({ election: electionId, level: 'STATE', isCurrent: true }).lean();
+  if (!stateCollations.length) return null;
 
-  if (!stateCollations.length) {
-    return null;
-  }
-
-  // Assumes the PollingUnit collection contains only the
-  // geographical coverage included in this election.
-  const pollingUnitsTotal = await PollingUnit.countDocuments({
-    isActive: true,
-  });
-
-  const common = combineCollations(
-    stateCollations,
-    pollingUnitsTotal
-  );
+  const pollingUnitsTotal = await PollingUnit.countDocuments({ isActive: true });
+  const common = combineCollations(stateCollations, pollingUnitsTotal);
 
   return {
-    election: electionId,
-    level: 'NATIONAL',
-    entity: null,
-    entityCode: 'NATIONAL',
-    entityName: 'National',
-
-    stateCode: null,
-    stateName: null,
-
-    lgaCode: null,
-    lgaName: null,
-
-    wardCode: null,
-    wardName: null,
-
+    election: electionId, level: 'NATIONAL', entity: null, entityCode: 'NATIONAL', entityName: 'National',
+    stateCode: null, stateName: null, lgaCode: null, lgaName: null, wardCode: null, wardName: null,
     ...common,
   };
 }
-
-/* =====================================================
-   COMPUTE LEVEL
-===================================================== */
 
 async function computeLevel(electionId, level, entityId) {
   switch (level) {
-    case 'WARD':
-      return computeWard(electionId, entityId);
-
-    case 'LGA':
-      return computeLGA(electionId, entityId);
-
-    case 'STATE':
-      return computeState(electionId, entityId);
-
-    case 'NATIONAL':
-      return computeNational(electionId);
-
-    default:
-      throw new Error(`Unsupported collation level: ${level}`);
+    case 'WARD': return computeWard(electionId, entityId);
+    case 'LGA': return computeLGA(electionId, entityId);
+    case 'STATE': return computeState(electionId, entityId);
+    case 'NATIONAL': return computeNational(electionId);
+    default: throw new Error(`Unsupported collation level: ${level}`);
   }
 }
 
@@ -516,105 +239,48 @@ async function computeLevel(electionId, level, entityId) {
    SAVE / REPLACE COLLATION
 ===================================================== */
 
-async function retireCurrentCollation(
-  electionId,
-  level,
-  entityId
-) {
-  const filter = {
-    election: electionId,
-    level,
-    isCurrent: true,
-  };
-
-  filter.entity = level === 'NATIONAL'
-    ? null
-    : entityId;
-
-  await Collation.updateMany(
-    filter,
-    {
-      $set: {
-        isCurrent: false,
-      },
-    }
-  );
+async function retireCurrentCollation(electionId, level, entityId) {
+  const filter = { election: electionId, level, isCurrent: true };
+  filter.entity = level === 'NATIONAL' ? null : entityId;
+  await Collation.updateMany(filter, { $set: { isCurrent: false } });
 }
 
-async function rebuildLevel(
-  electionId,
-  level,
-  entityId,
-  actorId
-) {
+async function rebuildLevel(electionId, level, entityId, actorId) {
   electionId = toObjectId(electionId);
+  entityId = level !== 'NATIONAL' ? toObjectId(entityId) : null;
 
-  if (level !== 'NATIONAL') {
-    entityId = toObjectId(entityId);
-  } else {
-    entityId = null;
-  }
+  const payload = await computeLevel(electionId, level, entityId);
 
-  const payload = await computeLevel(
-    electionId,
-    level,
-    entityId
-  );
-
-  // No verified source data: retire any old current record.
   if (!payload) {
-    await retireCurrentCollation(
-      electionId,
-      level,
-      entityId
-    );
-
-    return {
-      success: true,
-      level,
-      empty: true,
-      message: 'No verified source data for this collation.',
-    };
+    await retireCurrentCollation(electionId, level, entityId);
+    return { success: true, level, empty: true };
   }
 
   const session = await mongoose.startSession();
-
-  let savedCollation;
-
-    let savedCollation;
+  let savedCollation = null;
 
   try {
     await session.withTransaction(async () => {
       const filter = { election: electionId, level };
       filter.entity = level === 'NATIONAL' ? null : entityId;
 
-      const previous = await Collation.findOne(filter)
-        .sort({ version: -1 })
-        .session(session)
-        .lean();
-
+      const previous = await Collation.findOne(filter).sort({ version: -1 }).session(session).lean();
       const nextVersion = (previous?.version || 0) + 1;
 
-      await Collation.updateMany(
-        { ...filter, isCurrent: true },
-        { $set: { isCurrent: false } },
-        { session }
-      );
+      await Collation.updateMany({ ...filter, isCurrent: true }, { $set: { isCurrent: false } }, { session });
 
       const leadingParty = buildLeadingParty(payload.partyTotals, payload.totalValidVotes);
 
       const documents = await Collation.create(
-        [
-          {
-            ...payload,
-            leadingParty,
-            status: 'COLLATED',
-            collatedBy: actorId || null,
-            collatedAt: new Date(),
-            version: nextVersion,
-            isCurrent: true,
-          },
-        ],
+        [{
+          ...payload,
+          leadingParty,
+          status: 'COLLATED',
+          collatedBy: actorId || null,
+          collatedAt: new Date(),
+          version: nextVersion,
+          isCurrent: true,
+        }],
         { session }
       );
 
@@ -624,168 +290,59 @@ async function rebuildLevel(
     return { success: true, level, version: savedCollation.version, collation: savedCollation };
 
   } catch (err) {
-    // If the math is invalid, don't crash the server. Just log it.
-    console.error(`[COLLATION SKIP] Failed to save ${level} for entity ${entityId}:`, err.message);
+    // FIXED: Catch the math validation error so the server doesn't crash!
+    console.error(`[COLLATION SKIP] Failed to save ${level}:`, err.message);
     return { success: false, level, error: err.message };
   } finally {
     await session.endSession();
   }
-  
-
-/* =====================================================
-   RESULT CHANGE CASCADE
-===================================================== */
-
-async function rebuildForResult(result, actorId) {
-  if (!result) {
-    throw new Error('Result is required for collation rebuild');
-  }
-
-  const electionId = toObjectId(result.election);
-
-  const wardId = toObjectId(result.ward);
-  const lgaId = toObjectId(result.lga);
-  const stateId = toObjectId(result.state);
-
-  return withElectionLock(electionId, async () => {
-    // IMPORTANT: Always rebuild from the bottom upwards.
-    // Higher levels must read the newly saved lower levels.
-
-    const wardResult = await rebuildLevel(
-      electionId,
-      'WARD',
-      wardId,
-      actorId
-    );
-
-    const lgaResult = await rebuildLevel(
-      electionId,
-      'LGA',
-      lgaId,
-      actorId
-    );
-
-    const stateResult = await rebuildLevel(
-      electionId,
-      'STATE',
-      stateId,
-      actorId
-    );
-
-    const nationalResult = await rebuildLevel(
-      electionId,
-      'NATIONAL',
-      null,
-      actorId
-    );
-
-    return {
-      success: true,
-      electionId,
-      rebuilt: {
-        ward: wardResult,
-        lga: lgaResult,
-        state: stateResult,
-        national: nationalResult,
-      },
-    };
-  });
 }
 
 /* =====================================================
    FULL ELECTION REBUILD
 ===================================================== */
 
-
-    async function rebuildAllForElection(electionId, actorId) {
+async function rebuildAllForElection(electionId, actorId) {
   electionId = toObjectId(electionId);
 
   return withElectionLock(electionId, async () => {
-    console.log(`[COLLATION] Starting full rebuild for election ${electionId}`);
-
-    // ONLY fetch entities that actually have VERIFIED results
     const wards = await Result.distinct('ward', { election: electionId, isCurrent: true, status: VERIFIED_STATUS });
     const lgas = await Result.distinct('lga', { election: electionId, isCurrent: true, status: VERIFIED_STATUS });
     const states = await Result.distinct('state', { election: electionId, isCurrent: true, status: VERIFIED_STATUS });
 
-    let wardCount = 0;
-    let lgaCount = 0;
-    let stateCount = 0;
-
-    // 1. Rebuild only the wards that have results
-    for (const wardId of wards) {
-      await rebuildLevel(electionId, 'WARD', wardId, actorId);
-      wardCount++;
-    }
-
-    // 2. Rebuild only the LGAs that have results
-    for (const lgaId of lgas) {
-      await rebuildLevel(electionId, 'LGA', lgaId, actorId);
-      lgaCount++;
-    }
-
-    // 3. Rebuild only the states that have results
-    for (const stateId of states) {
-      await rebuildLevel(electionId, 'STATE', stateId, actorId);
-      stateCount++;
-    }
-
-    // 4. Rebuild national last
+    for (const wardId of wards) { await rebuildLevel(electionId, 'WARD', wardId, actorId); }
+    for (const lgaId of lgas) { await rebuildLevel(electionId, 'LGA', lgaId, actorId); }
+    for (const stateId of states) { await rebuildLevel(electionId, 'STATE', stateId, actorId); }
+    
     const national = await rebuildLevel(electionId, 'NATIONAL', null, actorId);
 
-    console.log(`[COLLATION] Completed rebuild for election ${electionId}`);
-
-    return {
-      success: true,
-      electionId,
-      counts: { wards: wardCount, lgas: lgaCount, states: stateCount },
-      national,
-    };
+    return { success: true, electionId, national };
   });
 }
 
+async function rebuildForResult(result, actorId) {
+  if (!result) throw new Error('Result is required');
+  const electionId = toObjectId(result.election);
 
-/* =====================================================
-   VERIFY COLLATION SOURCE
-===================================================== */
+  return withElectionLock(electionId, async () => {
+    await rebuildLevel(electionId, 'WARD', toObjectId(result.ward), actorId);
+    await rebuildLevel(electionId, 'LGA', toObjectId(result.lga), actorId);
+    await rebuildLevel(electionId, 'STATE', toObjectId(result.state), actorId);
+    await rebuildLevel(electionId, 'NATIONAL', null, actorId);
+    return { success: true, electionId };
+  });
+}
 
 async function verifyCollation(collationId) {
   const collation = await Collation.findById(collationId).lean();
+  if (!collation) throw new Error('Collation not found');
 
-  if (!collation) {
-    throw new Error('Collation not found');
-  }
-
-  const freshPayload = await computeLevel(
-    collation.election,
-    collation.level,
-    collation.entity
-  );
-
-  if (!freshPayload) {
-    return {
-      valid: false,
-      message: 'No verified source data exists for this collation.',
-      storedHash: collation.sourceHash,
-      currentHash: null,
-    };
-  }
+  const freshPayload = await computeLevel(collation.election, collation.level, collation.entity);
+  if (!freshPayload) return { valid: false, message: 'No source data.' };
 
   const valid = collation.sourceHash === freshPayload.sourceHash;
-
-  return {
-    valid,
-    message: valid
-      ? 'Collation source is up to date.'
-      : 'Source data has changed. Rebuild this collation.',
-    storedHash: collation.sourceHash,
-    currentHash: freshPayload.sourceHash,
-  };
+  return { valid, message: valid ? 'Up to date.' : 'Needs rebuild.', storedHash: collation.sourceHash, currentHash: freshPayload.sourceHash };
 }
-
-/* =====================================================
-   EXPORTS
-===================================================== */
 
 module.exports = {
   rebuildForResult,
