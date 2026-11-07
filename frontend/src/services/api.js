@@ -139,3 +139,31 @@ export const geoApi = {
   wards: (lgaCode) => api.get(`/geo/lgas/${lgaCode}/wards`).then(r => r.data.wards),
   pollingUnits: (wardCode) => api.get(`/geo/wards/${wardCode}/polling-units`).then(r => r.data.pollingUnits),
 };
+
+export const reportsApi = {
+  // Returns the full download URL for a CSV
+  resultsCsvUrl: (electionId) => `${import.meta.env.VITE_API_URL || 'http://localhost:5000/api'}/reports/${electionId}/results.csv`,
+  collationCsvUrl: (electionId) => `${import.meta.env.VITE_API_URL || 'http://localhost:5000/api'}/reports/${electionId}/collation.csv`,
+
+  // Helper to download with auth header — browsers don't send auth on <a href>
+  download: async (url, filename) => {
+    const { tokens } = await import('./api');
+    const token = tokens.access;
+    const res = await fetch(url, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Download failed' }));
+      throw new Error(err.error || 'Download failed');
+    }
+    const blob = await res.blob();
+    const downloadUrl = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = downloadUrl;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    window.URL.revokeObjectURL(downloadUrl);
+  },
+};
