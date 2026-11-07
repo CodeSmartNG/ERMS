@@ -15,6 +15,12 @@ const ALLOWED_STATES = [
   'bauchi', 'kaduna', 'jigawa', 'kebbi', 'yobe'
 ];
 
+// NEW: Hardcoded INEC codes to prevent duplicate key errors (e.g., Kano/Katsina/Kaduna all starting with 'KA')
+const STATE_CODES = {
+  'Adamawa': 'AD', 'Bauchi': 'BA', 'Jigawa': 'JI', 'Kaduna': 'KD', 'Kano': 'KN',
+  'Katsina': 'KT', 'Kebbi': 'KE', 'Sokoto': 'SO', 'Yobe': 'YO', 'Zamfara': 'ZA'
+};
+
 const ZONE_BY_STATE = {
   Adamawa: 'NE', Bauchi: 'NE', Jigawa: 'NW', Kaduna: 'NW', Kano: 'NW',
   Katsina: 'NW', Kebbi: 'NW', Sokoto: 'NW', Yobe: 'NE', Zamfara: 'NW',
@@ -24,10 +30,6 @@ function slugify(s) {
   return s.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 }
 
-function stateCodeFromRow(state, csvCode) {
-  return (csvCode || '').trim().toUpperCase() || state.slice(0, 2).toUpperCase();
-}
-
 async function* readCsvRows(file) {
   const rl = readline.createInterface({ input: fs.createReadStream(file), crlfDelay: Infinity });
   let headers = null;
@@ -35,7 +37,7 @@ async function* readCsvRows(file) {
     if (!line.trim()) continue;
     const cells = line.split(',');
     if (!headers) {
-      headers = cells.map((h) => h.trim().toLowerCase()); // Force headers to lowercase
+      headers = cells.map((h) => h.trim().toLowerCase());
       continue;
     }
     yield Object.fromEntries(headers.map((h, idx) => [h, (cells[idx] || '').trim()]));
@@ -59,31 +61,31 @@ async function main() {
   const wardCache = new Map(); 
   let stats = { states: 0, lgas: 0, wards: 0, pus: 0, skipped: 0 };
 
-  for await (const row of readCsvRows(CSV_PATH)) {
-    // Access properties using lowercase headers just to be safe
-    const stateName = row.state;
-    const lgaName = row.lg;
-    const wardName = row.ward;
-    const puName = row.location || row.pu_name || `PU ${row.pu_code || row.code}`;
-    const puCode = row.code || row.pu_code;
+  try {
+    for await (const row of readCsvRows(CSV_PATH)) {
+      const stateName = row.state?.trim();
+      const lgaName = row.lg?.trim();
+      const wardName = row.ward?.trim();
+      const puName = row.location || row.pu_name || `PU ${row.pu_code || row.code}`;
+      const puCode = row.code || row.pu_code;
 
-    if (!stateName || !lgaName || !wardName || !puCode) {
-      stats.skipped++;
-      continue;
-    }
+      if (!stateName || !lgaName || !wardName || !puCode) {
+        stats.skipped++;
+        continue;
+      }
 
-    // Check if state is in our allowed list (case-insensitive)
-    if (!ALLOWED_STATES.includes(stateName.toLowerCase())) {
-      stats.skipped++;
-      continue;
-    }
+      // Check if state is in our allowed list (case-insensitive)
+      if (!ALLOWED_STATES.includes(stateName.toLowerCase())) {
+        stats.skipped++;
+        continue;
+      }
 
-    const stateCode = stateCodeFromRow(stateName, row.state_code);
+      // Use the hardcoded map, or fallback to the CSV, or fallback to first 2 letters
+      const stateCode = STATE_CODES[stateName] || (row.state_code || '').toUpperCase() || stateName.slice(0, 2).toUpperCase();
 
-    // ---- State ----
-    let state = stateCache.get(stateName);
-    if (!state) {
-      try {
+      // ---- State ----
+      let state = stateCache.get(stateName);
+      if (!state) {
         state = await models.State.findOneAndUpdate(
           { code: stateCode },
           { $setOnInsert: { 
@@ -98,17 +100,13 @@ async function main() {
         );
         stateCache.set(stateName, state);
         stats.states++;
-      } catch (err) {
-        console.error(`❌ Failed to save State: ${stateName} (Code: ${stateCode})`, err.message);
-        continue;
+        console.log(`[Seed]: Created State ${stateName} (${stateCode})`);
       }
-    }
 
-    // ---- LGA ----
-    const lgaCode = `${stateCode}-${slugify(lgaName)}`;
-    let lga = lgaCache.get(lgaCode);
-    if (!lga) {
-      try {
+      // ---- LGA ----
+      const lgaCode = `${stateCode}-${slugify(lgaName)}`;
+      let lga = lgaCache.get(lgaCode);
+      if (!lga) {
         lga = await models.LGA.findOneAndUpdate(
           { code: lgaCode },
           { $setOnInsert: { code: lgaCode, name: lgaName, state: state._id, stateCode, isActive: true } },
@@ -116,17 +114,12 @@ async function main() {
         );
         lgaCache.set(lgaCode, lga);
         stats.lgas++;
-      } catch (err) {
-        console.error(`❌ Failed to save LGA: ${lgaName}`, err.message);
-        continue;
       }
-    }
 
-    // ---- Ward ----
-    const wardCode = `${lgaCode}-${slugify(wardName)}`;
-    let ward = wardCache.get(wardCode);
-    if (!ward) {
-      try {
+      // ---- Ward ----
+      const wardCode = `${lgaCode}-${slugify(wardName)}`;
+      let ward = wardCache.get(wardCode);
+      if (!ward) {
         ward = await models.Ward.findOneAndUpdate(
           { code: wardCode },
           { $setOnInsert: { code: wardCode, name: wardName, lga: lga._id, state: state._id, lgaCode, stateCode, isActive: true } },
@@ -134,15 +127,10 @@ async function main() {
         );
         wardCache.set(wardCode, ward);
         stats.wards++;
-      } catch (err) {
-        console.error(`❌ Failed to save Ward: ${wardName}`, err.message);
-        continue;
       }
-    }
 
-    // ---- PollingUnit ----
-    const puPath = [stateCode, lgaCode, wardCode, puCode];
-    try {
+      // ---- PollingUnit ----
+      const puPath = [stateCode, lgaCode, wardCode, puCode];
       await models.PollingUnit.updateOne(
         { code: puCode },
         { $setOnInsert: { 
@@ -154,9 +142,9 @@ async function main() {
         { upsert: true }
       );
       stats.pus++;
-    } catch (err) {
-      // Ignore PU errors to keep going
     }
+  } catch (err) {
+    console.error('❌ FATAL ERROR DURING SEED:', err.message);
   }
 
   console.log(`\n📊 Summary:`);
