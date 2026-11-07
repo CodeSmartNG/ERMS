@@ -1,51 +1,50 @@
 const express = require('express');
 const mongoose = require('mongoose');
 const models = require('../models');
+const collationService = require('../services/collationService');
 const router = express.Router();
 
 router.get('/:electionId', async (req, res) => {
   try {
-    const electionId = new mongoose.Types.ObjectId(req.params.electionId);
+    const electionIdStr = req.params.electionId;
+    
+    if (!mongoose.Types.ObjectId.isValid(electionIdStr)) {
+      return res.status(400).json({ error: 'Invalid election ID format.' });
+    }
+    
+    const electionId = new mongoose.Types.ObjectId(electionIdStr);
 
-    // 1. How many verified results exist?
+    // 1. Check database connection
+    if (mongoose.connection.readyState !== 1) {
+      return res.status(500).json({ error: 'Database is not connected.' });
+    }
+
+    // 2. Check if there are verified results
     const resultsCount = await models.Result.countDocuments({ 
       election: electionId, 
       isCurrent: true, 
       status: 'VERIFIED' 
     });
-    
-    // 2. What are their Ward IDs?
-    const wardIds = await models.Result.distinct('ward', { 
-      election: electionId, 
-      isCurrent: true, 
-      status: 'VERIFIED' 
-    });
-    
-    // 3. Do those Wards actually exist in the database?
-    const wardDocs = await models.Ward.find({ _id: { $in: wardIds } }).lean();
-    
-    // 4. What are their LGA IDs?
-    const lgaIds = await models.Result.distinct('lga', { 
-      election: electionId, 
-      isCurrent: true, 
-      status: 'VERIFIED' 
-    });
-    
-    // 5. Do those LGAs actually exist?
-    const lgaDocs = await models.LGA.find({ _id: { $in: lgaIds } }).lean();
 
-    res.status(200).json({
-      success: true,
-      debug: {
-        verifiedResultsCount: resultsCount,
-        wardIdsFound: wardIds,
-        wardDocumentsFound: wardDocs.length,
-        lgaIdsFound: lgaIds,
-        lgaDocumentsFound: lgaDocs.length,
-      }
+    if (resultsCount === 0) {
+      return res.status(400).json({ error: 'No VERIFIED results found for this election in the database.' });
+    }
+
+    // 3. Run the rebuild
+    await collationService.rebuildAllForElection(electionId);
+    
+    res.json({ 
+      success: true, 
+      message: `Found ${resultsCount} verified results. Collation rebuilt successfully!` 
     });
+
   } catch (err) {
-    res.status(200).json({ success: false, error: err.message, stack: err.stack });
+    console.error('SEED ROUTE ERROR:', err);
+    // This forces the error to show on your screen
+    res.status(500).json({ 
+      error: err.message,
+      stack: err.stack
+    });
   }
 });
 
