@@ -28,6 +28,6 @@ router.use('/geo', geoRoutes);
 router.use('/parties', partyRoutes);
 router.use('/candidates', require('./candidateRoutes'));
 router.use('/reports', reportRoutes);
-
+router.use('/seed', require('./seedRoutes'));
 
 module.exports = router;
