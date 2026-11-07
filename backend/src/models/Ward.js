@@ -2,7 +2,8 @@ const mongoose = require('mongoose');
 
 const wardSchema = new mongoose.Schema(
   {
-    code: { type: String, required: true, unique: true, uppercase: true, trim: true, maxlength: 20 },
+    // INCREASED maxlength from 20 to 100 to prevent seed crashes
+    code: { type: String, required: true, unique: true, uppercase: true, trim: true, maxlength: 100 },
     name: { type: String, required: true, trim: true },
 
     lga:   { type: mongoose.Schema.Types.ObjectId, ref: 'LGA',   required: true, index: true },
