@@ -27,11 +27,12 @@ export default function UsersPage() {
   const [busy, setBusy] = useState(false);
 
   // Geo Data Fetching
-  const statesApi = useApi(() => geoApi.states().then(r => r.data.states), [], { initial: [] });
-  const lgasApi = useApi(() => stateCode ? geoApi.lgas(stateCode).then(r => r.data.lgas) : Promise.resolve([]), [stateCode], { initial: [] });
-  const wardsApi = useApi(() => lgaCode ? geoApi.wards(lgaCode).then(r => r.data.wards) : Promise.resolve([]), [lgaCode], { initial: [] });
-  const pusApi = useApi(() => wardCode ? geoApi.pollingUnits(wardCode).then(r => r.data.pollingUnits) : Promise.resolve([]), [wardCode], { initial: [] });
-
+  // Geo Data Fetching
+const statesApi = useApi(() => geoApi.states(), [], { initial: [] });
+const lgasApi = useApi(() => stateCode ? geoApi.lgas(stateCode) : Promise.resolve([]), [stateCode], { initial: [] });
+const wardsApi = useApi(() => lgaCode ? geoApi.wards(lgaCode) : Promise.resolve([]), [lgaCode], { initial: [] });
+const pusApi = useApi(() => wardCode ? geoApi.pollingUnits(wardCode) : Promise.resolve([]), [wardCode], { initial: [] });
+  
   useEffect(() => { setLgaCode(''); setWardCode(''); setPuId(''); }, [stateCode]);
   useEffect(() => { setWardCode(''); setPuId(''); }, [lgaCode]);
   useEffect(() => { setPuId(''); }, [wardCode]);
