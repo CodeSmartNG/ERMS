@@ -2,7 +2,8 @@ const mongoose = require('mongoose');
 
 const lgaSchema = new mongoose.Schema(
   {
-    code:    { type: String, required: true, unique: true, uppercase: true, trim: true, maxlength: 15 },
+    // INCREASED maxlength from 15 to 100 to prevent seed crashes
+    code:    { type: String, required: true, unique: true, uppercase: true, trim: true, maxlength: 100 },
     name:    { type: String, required: true, trim: true },
 
     state:   { type: mongoose.Schema.Types.ObjectId, ref: 'State', required: true, index: true },
