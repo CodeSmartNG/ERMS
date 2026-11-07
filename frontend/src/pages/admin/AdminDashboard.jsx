@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { ChevronRight, RefreshCw, MapPin, AlertTriangle } from 'lucide-react';
+import { ChevronRight, RefreshCw, MapPin, AlertTriangle, Download } from 'lucide-react';
 import { useApi } from '@/hooks/useApi';
-import api, { collationApi } from '@/services/api';
+import api, { collationApi, reportsApi } from '@/services/api';
 import { useAuth } from '@/context/AuthContext';
 import PartyBar from '@/components/PartyBar';
 import ReportingRing from '@/components/ReportingRing';
@@ -19,6 +19,8 @@ export default function AdminDashboard() {
   const { user } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const electionId = searchParams.get('election') || '';
+
+  const [downloading, setDownloading] = useState(null); // 'results' | 'collation' | null
 
   const electionsApi = useApi(
     () => api.get('/elections', { params: { status: 'ACTIVE' } }).then((r) => r.data.elections),
@@ -56,13 +58,41 @@ export default function AdminDashboard() {
     return [...national.partyTotals].sort((a, b) => b.votes - a.votes);
   }, [national]);
 
+  async function handleDownloadResults() {
+    if (!electionId || downloading) return;
+    setDownloading('results');
+    try {
+      const url = reportsApi.resultsCsvUrl(electionId);
+      const election = elections.find(e => e._id === electionId);
+      await reportsApi.download(url, `ERMS-${election?.code || 'export'}-results.csv`);
+    } catch (err) {
+      alert(err.message || 'Download failed');
+    } finally {
+      setDownloading(null);
+    }
+  }
+
+  async function handleDownloadCollation() {
+    if (!electionId || downloading) return;
+    setDownloading('collation');
+    try {
+      const url = reportsApi.collationCsvUrl(electionId);
+      const election = elections.find(e => e._id === electionId);
+      await reportsApi.download(url, `ERMS-${election?.code || 'export'}-collation.csv`);
+    } catch (err) {
+      alert(err.message || 'Download failed');
+    } finally {
+      setDownloading(null);
+    }
+  }
+
   if (elections.length === 0 && !electionsApi.loading) {
     return (
       <div className="mx-auto max-w-2xl p-8">
         <div className="card p-8 text-center">
           <p className="text-slate-600">No active elections.</p>
           <p className="mt-2 text-sm text-slate-500">
-            Create one from the admin panel (coming soon) or via API.
+            Create one from the admin panel or via API.
           </p>
         </div>
       </div>
@@ -79,7 +109,7 @@ export default function AdminDashboard() {
             {ROLE_LABELS_LOOKUP[user.role] || user.role} view
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <select
             className="input max-w-xs"
             value={electionId}
@@ -154,6 +184,31 @@ export default function AdminDashboard() {
               </div>
             </div>
           )}
+
+          {/* Download Reports Section */}
+          <div className="card">
+            <div className="card-header">
+              <h2 className="text-base font-semibold">Download Reports</h2>
+            </div>
+            <div className="card-body flex flex-col gap-2 sm:flex-row">
+              <button
+                onClick={handleDownloadResults}
+                disabled={!electionId || downloading === 'results'}
+                className="btn-secondary flex-1"
+              >
+                <Download className="h-4 w-4" />
+                {downloading === 'results' ? 'Preparing…' : 'All Polling Unit Results (CSV)'}
+              </button>
+              <button
+                onClick={handleDownloadCollation}
+                disabled={!electionId || downloading === 'collation'}
+                className="btn-secondary flex-1"
+              >
+                <Download className="h-4 w-4" />
+                {downloading === 'collation' ? 'Preparing…' : 'LGA Collation Summary (CSV)'}
+              </button>
+            </div>
+          </div>
 
           <div className="card">
             <div className="card-header">
