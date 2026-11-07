@@ -1,31 +1,35 @@
 const express = require('express');
 const mongoose = require('mongoose');
 const models = require('../models');
+const collationService = require('../services/collationService');
 const router = express.Router();
 
 router.get('/:electionId', async (req, res) => {
   try {
     const electionId = new mongoose.Types.ObjectId(req.params.electionId);
-
-    // 1. Check how many results are saved and verified
-    const allResults = await models.Result.countDocuments({ election: electionId, isCurrent: true });
-    const verifiedResults = await models.Result.countDocuments({ election: electionId, isCurrent: true, status: 'VERIFIED' });
     
-    // 2. Check if any collation documents exist at all
-    const collations = await models.Collation.find({ election: electionId }).lean();
+    // 1. Delete all old collation records so we start fresh
+    await models.Collation.deleteMany({ election: electionId });
+    console.log('[DEBUG] Cleared old collations.');
 
-    res.status(200).json({
-      success: true,
-      debug: {
-        totalCurrentResults: allResults,
-        totalVerifiedResults: verifiedResults,
-        collationsInDb: collations.length,
-        sampleCollation: collations.length > 0 ? collations[0] : null,
-        verifiedResultSample: verifiedResults > 0 ? await models.Result.findOne({ election: electionId, isCurrent: true, status: 'VERIFIED' }).lean() : null
-      }
+    // 2. Run the rebuild
+    await collationService.rebuildAllForElection(electionId);
+
+    // 3. Check what got saved
+    const savedCollations = await models.Collation.find({ 
+      election: electionId, 
+      isCurrent: true 
+    }).lean();
+
+    res.status(200).json({ 
+      success: true, 
+      message: 'Rebuild complete. Cleared old data first.',
+      levelsSaved: savedCollations.map(c => c.level)
     });
+
   } catch (err) {
-    res.status(500).json({ error: err.message, stack: err.stack });
+    console.error('[DEBUG] Rebuild error:', err);
+    res.status(200).json({ success: false, error: err.message, stack: err.stack });
   }
 });
 
