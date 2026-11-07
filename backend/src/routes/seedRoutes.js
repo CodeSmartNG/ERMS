@@ -7,13 +7,19 @@ const path = require('path');
 const router = express.Router();
 
 router.get('/', (req, res) => {
-  res.json({ message: 'Downloading CSV and seeding Northern states. Watch Render logs.' });
+  res.json({ message: 'Downloading full CSV. Watch Render logs.' });
 
   const dataDir = path.join(__dirname, '../../data');
   const csvPath = path.join(dataDir, 'nigeria_polling_units.csv');
 
   if (!fs.existsSync(dataDir)) {
     fs.mkdirSync(dataDir, { recursive: true });
+  }
+
+  // FORCE DELETE the old partial CSV file
+  if (fs.existsSync(csvPath)) {
+    fs.unlinkSync(csvPath);
+    console.log('🗑️ Deleted old partial CSV.');
   }
 
   const file = fs.createWriteStream(csvPath);
@@ -23,7 +29,7 @@ router.get('/', (req, res) => {
     
     file.on('finish', () => {
       file.close();
-      console.log('✅ CSV Downloaded successfully. Starting Northern states seed...');
+      console.log('✅ Full CSV Downloaded successfully. Starting seed...');
       
       const seedProcess = spawn('node', ['scripts/seedGeo.js']);
 
