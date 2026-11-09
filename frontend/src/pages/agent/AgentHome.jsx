@@ -4,6 +4,7 @@ import { FileText, AlertTriangle, Upload, LogOut, WifiOff } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { listQueue, QUEUE_STATUS } from '@/services/offlineQueue';
 import { startSyncLoop } from '@/services/syncService';
+import InstallAppButton from '@/components/InstallAppButton'; // <-- ADDED
 
 export default function AgentHome() {
   const { user, logout } = useAuth();
@@ -64,6 +65,9 @@ export default function AgentHome() {
           <ActionCard to="/agent/submit-result" icon={FileText} title="Submit Result" subtitle="Form EC8A + evidence" />
           <ActionCard to="/agent/submit-incident" icon={AlertTriangle} title="Report Incident" subtitle="With photos / video" />
         </div>
+
+        {/* ADDED: Install App Button */}
+        <InstallAppButton className="w-full btn-secondary flex items-center justify-center gap-2 py-3" />
 
         {queue.length > 0 && (
           <Link to="/agent/queue" className="card block p-4 hover:bg-slate-50">
