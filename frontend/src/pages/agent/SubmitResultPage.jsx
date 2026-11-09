@@ -5,11 +5,11 @@ import { toast } from 'sonner';
 import api from '@/services/api';
 import { enqueue } from '@/services/offlineQueue';
 import { flushQueue } from '@/services/syncService';
-import { useAuth } from '@/context/AuthContext'; // <-- ADDED
+import { useAuth } from '@/context/AuthContext';
 
 export default function SubmitResultPage() {
   const navigate = useNavigate();
-  const { user } = useAuth(); // <-- ADDED
+  const { user } = useAuth();
 
   const [elections, setElections] = useState([]);
   const [parties, setParties] = useState([]);
@@ -70,7 +70,7 @@ export default function SubmitResultPage() {
 
     const payload = {
       election: electionId,
-      pollingUnit: user?.scope?.pollingUnit, // <-- ADDED: Pulls the agent's PU ID
+      pollingUnit: user?.scope?.pollingUnit,
       registeredVoters: Number(registeredVoters),
       accreditedVoters: Number(accreditedVoters),
       totalVotesCast: Number(totalVotesCast),
@@ -85,10 +85,12 @@ export default function SubmitResultPage() {
       const record = await enqueue({
         kind: 'result',
         payload: { ...payload, partyVotes: JSON.stringify(payload.partyVotes) },
-        evidenceBlob: photo.blob,
-        evidenceName: photo.name,
+        evidenceFiles: [{ blob: photo.blob, name: photo.name }], // <-- CHANGED to array
       });
-      if (navigator.onLine) flushQueue().catch(() => {});
+      
+      // Always flush - the sync service will handle offline gracefully
+      flushQueue().catch(() => {});
+      
       setDone(record);
       toast.success('Result saved.');
     } catch (err) {
@@ -103,6 +105,7 @@ export default function SubmitResultPage() {
       <div className="flex min-h-screen flex-col items-center justify-center bg-slate-50 px-6 text-center">
         <CheckCircle2 className="h-16 w-16 text-brand-600" />
         <h2 className="mt-4 text-xl font-semibold text-slate-900">Result submitted</h2>
+        <p className="mt-2 max-w-xs text-sm text-slate-500">It will be sent to the server now or when you're back online.</p>
         <button onClick={() => navigate('/agent')} className="btn-primary mt-8 w-full max-w-xs">Done</button>
       </div>
     );
