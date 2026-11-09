@@ -14,31 +14,38 @@ const dbPromise = openDB(DB_NAME, DB_VERSION, {
 });
 
 export const QUEUE_STATUS = {
-  PENDING: 'PENDING',      // waiting to send
-  SENDING: 'SENDING',      // in flight
-  SENT: 'SENT',            // server accepted
-  FAILED: 'FAILED',        // permanent failure (4xx) — user must act
+  PENDING: 'PENDING',
+  SENDING: 'SENDING',
+  SENT: 'SENT',
+  FAILED: 'FAILED',
 };
 
 /**
- * Add a submission to the queue. Called immediately on form submit so the
- * agent never blocks on network. Returns the local record.
+ * Add a submission to the queue.
+ * Accepts BOTH `evidenceFiles` (array) and legacy `evidenceBlob` (single file).
  */
-export async function enqueue({ kind, payload, evidenceBlob, evidenceName }) {
+export async function enqueue({ kind, payload, evidenceFiles, evidenceBlob, evidenceName }) {
   const db = await dbPromise;
   const localId = crypto.randomUUID();
+  
+  // Normalize: if caller sends evidenceFiles, use it; else wrap evidenceBlob in array
+  const files = evidenceFiles 
+    || (evidenceBlob ? [{ blob: evidenceBlob, name: evidenceName || 'evidence.jpg' }] : []);
+
   const record = {
     localId,
-    kind, // 'result' | 'incident'
+    kind,
     payload,
-    evidenceBlob,
-    evidenceName,
+    evidenceFiles: files,     // <-- new field (always an array)
+    evidenceBlob: null,       // <-- keep for backwards compat
+    evidenceName: null,
     status: QUEUE_STATUS.PENDING,
     createdAt: Date.now(),
     attempts: 0,
     lastError: null,
     serverResponse: null,
   };
+  
   await db.put('submissions', record);
   return record;
 }
@@ -71,7 +78,6 @@ export async function removeFromQueue(localId) {
   await db.delete('submissions', localId);
 }
 
-// --- NEW: Clear the entire queue (used on logout) ---
 export async function clearQueue() {
   const db = await dbPromise;
   await db.clear('submissions');
