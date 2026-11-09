@@ -2,7 +2,6 @@
 require('dotenv').config();
 const fs = require('fs');
 const path = require('path');
-const readline = require('readline');
 const mongoose = require('mongoose');
 const env = require('../src/config/env');
 const models = require('../src/models');
@@ -19,36 +18,15 @@ const STATE_CODES = {
   'Katsina': 'KT', 'Kebbi': 'KE', 'Sokoto': 'SO', 'Yobe': 'YO', 'Zamfara': 'ZA'
 };
 
-const ZONE_BY_STATE = {
-  Adamawa: 'NE', Bauchi: 'NE', Jigawa: 'NW', Kaduna: 'NW', Kano: 'NW',
-  Katsina: 'NW', Kebbi: 'NW', Sokoto: 'NW', Yobe: 'NE', Zamfara: 'NW',
-};
-
 function slugify(s) {
   return s.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 }
 
 function formatStateName(name) {
   if (!name) return '';
-  // The crucial fix: strip out any hidden \r characters
-  const clean = name.replace(/\r/g, '').replace(/\n/g, '').trim();
+  const clean = name.replace(/["\r\n]/g, '').trim();
   const lower = clean.toLowerCase();
   return lower.charAt(0).toUpperCase() + lower.slice(1);
-}
-
-async function* readCsvRows(file) {
-  const rl = readline.createInterface({ input: fs.createReadStream(file), crlfDelay: Infinity });
-  let headers = null;
-  for await (const line of rl) {
-    if (!line.trim()) continue;
-    // Split by comma, and strip any \r from the cells
-    const cells = line.split(',').map(c => c.replace(/\r/g, '').trim());
-    if (!headers) {
-      headers = cells.map((h) => h.toLowerCase());
-      continue;
-    }
-    yield Object.fromEntries(headers.map((h, idx) => [h, (cells[idx] || '')]));
-  }
 }
 
 async function main() {
@@ -62,105 +40,98 @@ async function main() {
   await models.State.deleteMany({});
   console.log('✅ Old data cleared.\n');
 
+  console.log('📖 Reading CSV file into memory...');
+  const fileContent = fs.readFileSync(CSV_PATH, 'utf8');
+  const lines = fileContent.split(/\r?\n/);
+  
+  console.log('⚙️ Processing rows...');
+  
   const stateCache = new Map(); 
-  const lgaCache = new Map(); 
-  const wardCache = new Map(); 
-  let stats = { states: 0, lgas: 0, wards: 0, pus: 0, skipped: 0 };
+  const lgaCache = new Map();   
+  const wardCache = new Map();  
 
-  try {
-    for await (const row of readCsvRows(CSV_PATH)) {
-      const rawStateName = row.state;
-      const lgaName = row.lg;
-      const wardName = row.ward;
-      const puName = row.location || row.pu_name || `PU ${row.pu_code || row.code}`;
-      const puCode = row.code || row.pu_code;
+  const statesToInsert = [];
+  const lgasToInsert = [];
+  const wardsToInsert = [];
+  const pusToInsert = [];
 
-      if (!rawStateName || !lgaName || !wardName || !puCode) {
-        stats.skipped++;
-        continue;
-      }
+  for (let i = 1; i < lines.length; i++) {
+    const line = lines[i];
+    if (!line.trim()) continue;
 
-      const stateName = formatStateName(rawStateName);
+    const row = line.split(',').map(c => c.replace(/["\r\n]/g, '').trim());
+    
+    const rawStateName = row[1];
+    const lgaName = row[2];
+    const wardName = row[3];
+    const puCode = row[8];
+    const puName = row[9] || `PU ${puCode}`;
 
-      if (!ALLOWED_STATES.includes(stateName.toLowerCase())) {
-        stats.skipped++;
-        continue;
-      }
+    if (!rawStateName || !lgaName || !wardName || !puCode) continue;
 
-      const stateCode = STATE_CODES[stateName] || stateName.slice(0, 2).toUpperCase();
+    const stateName = formatStateName(rawStateName);
+    if (!ALLOWED_STATES.includes(stateName.toLowerCase())) continue;
 
-      let state = stateCache.get(stateName);
-      if (!state) {
-        try {
-          state = await models.State.findOneAndUpdate(
-            { code: stateCode },
-            { $setOnInsert: { 
-                code: stateCode, 
-                name: stateName, 
-                slug: slugify(stateName), 
-                zone: ZONE_BY_STATE[stateName] || 'NC', 
-                isActive: true 
-              } 
-            },
-            { upsert: true, new: true, lean: true }
-          );
-          stateCache.set(stateName, state);
-          stats.states++;
-          console.log(`[Seed]: Created State ${stateName} (${stateCode})`);
-        } catch (err) {
-          stats.skipped++;
-          continue;
-        }
-      }
+    const stateCode = STATE_CODES[stateName] || stateName.slice(0, 2).toUpperCase();
 
-      const lgaCode = `${stateCode}-${slugify(lgaName)}`;
-      let lga = lgaCache.get(lgaCode);
-      if (!lga) {
-        lga = await models.LGA.findOneAndUpdate(
-          { code: lgaCode },
-          { $setOnInsert: { code: lgaCode, name: lgaName, state: state._id, stateCode, isActive: true } },
-          { upsert: true, new: true, lean: true }
-        );
-        lgaCache.set(lgaCode, lga);
-        stats.lgas++;
-      }
-
-      const wardCode = `${lgaCode}-${slugify(wardName)}`;
-      let ward = wardCache.get(wardCode);
-      if (!ward) {
-        ward = await models.Ward.findOneAndUpdate(
-          { code: wardCode },
-          { $setOnInsert: { code: wardCode, name: wardName, lga: lga._id, state: state._id, lgaCode, stateCode, isActive: true } },
-          { upsert: true, new: true, lean: true }
-        );
-        wardCache.set(wardCode, ward);
-        stats.wards++;
-      }
-
-      const puPath = [stateCode, lgaCode, wardCode, puCode];
-      await models.PollingUnit.updateOne(
-        { code: puCode },
-        { $setOnInsert: { 
-            code: puCode, name: puName, ward: ward._id, lga: lga._id, state: state._id, 
-            wardCode, lgaCode, stateCode, path: puPath, 
-            ancestors: { state: state._id, lga: lga._id, ward: ward._id }, 
-            address: row.location || null, registeredVoters: 0, isActive: true 
-        } },
-        { upsert: true }
-      );
-      stats.pus++;
+    let stateId = stateCache.get(stateName);
+    if (!stateId) {
+      stateId = new mongoose.Types.ObjectId();
+      stateCache.set(stateName, stateId);
+      statesToInsert.push({
+        _id: stateId, code: stateCode, name: stateName, slug: slugify(stateName), zone: 'NC', isActive: true
+      });
     }
-  } catch (err) {
-    console.error('❌ FATAL ERROR DURING SEED:', err.message);
+
+    const lgaCode = `${stateCode}-${slugify(lgaName)}`;
+    let lgaId = lgaCache.get(lgaCode);
+    if (!lgaId) {
+      lgaId = new mongoose.Types.ObjectId();
+      lgaCache.set(lgaCode, lgaId);
+      lgasToInsert.push({
+        _id: lgaId, code: lgaCode, name: lgaName, state: stateId, stateCode: stateCode, isActive: true
+      });
+    }
+
+    const wardCode = `${lgaCode}-${slugify(wardName)}`;
+    let wardId = wardCache.get(wardCode);
+    if (!wardId) {
+      wardId = new mongoose.Types.ObjectId();
+      wardCache.set(wardCode, wardId);
+      wardsToInsert.push({
+        _id: wardId, code: wardCode, name: wardName, lga: lgaId, state: stateId, lgaCode, stateCode, isActive: true
+      });
+    }
+
+    pusToInsert.push({
+      code: puCode,
+      name: puName,
+      ward: wardId,
+      lga: lgaId,
+      state: stateId,
+      wardCode,
+      lgaCode,
+      stateCode,
+      path: [stateCode, lgaCode, wardCode, puCode],
+      ancestors: { state: stateId, lga: lgaId, ward: wardId },
+      address: puName,
+      registeredVoters: 0,
+      isActive: true
+    });
   }
 
-  console.log(`\n📊 Summary:`);
-  console.log(`   States saved  : ${stats.states}`);
-  console.log(`   LGAs saved    : ${stats.lgas}`);
-  console.log(`   Wards saved   : ${stats.wards}`);
-  console.log(`   PUs saved     : ${stats.pus}`);
-  console.log(`   Rows skipped  : ${stats.skipped}`);
-  console.log('\n✅ Done.');
+  console.log(`📦 Found ${statesToInsert.length} States, ${lgasToInsert.length} LGAs, ${wardsToInsert.length} Wards, ${pusToInsert.length} PUs.`);
+  
+  if (statesToInsert.length) await models.State.insertMany(statesToInsert);
+  if (lgasToInsert.length) await models.LGA.insertMany(lgasToInsert);
+  if (wardsToInsert.length) await models.Ward.insertMany(wardsToInsert);
+  
+  const chunkSize = 5000;
+  for (let i = 0; i < pusToInsert.length; i += chunkSize) {
+    await models.PollingUnit.insertMany(pusToInsert.slice(i, i + chunkSize));
+  }
+
+  console.log('\n✅ Done! All data saved in a fraction of a second.');
   await mongoose.disconnect();
 }
 
