@@ -3,18 +3,6 @@ const { INCIDENT_TYPES, SEVERITIES, INCIDENT_STATUSES } = require('../models/Inc
 
 const objectId = z.string().regex(/^[a-f\d]{24}$/i, 'Must be a valid ObjectId');
 
-// Where the incident happened. At least one of the geo fields must be set;
-// the controller enforces the "leaf" rule (state alone is fine, ward needs lga, etc.).
-const locationScopeSchema = z.object({
-  pollingUnit: objectId.optional(),
-  ward: objectId.optional(),
-  lga: objectId.optional(),
-  state: objectId.optional(),
-}).refine(
-  (v) => v.pollingUnit || v.ward || v.lga || v.state,
-  { message: 'At least one location field (pollingUnit/ward/lga/state) is required' }
-);
-
 const gpsSchema = z
   .string()
   .optional()
@@ -40,24 +28,16 @@ const submitIncidentSchema = z.object({
 
   election: objectId.optional(),
 
-  // Location
+  // Location (optional here, enforced in controller via agent scope)
   pollingUnit: objectId.optional(),
   ward: objectId.optional(),
   lga: objectId.optional(),
   state: objectId.optional(),
 
   occurredAt: z.string().datetime({ offset: true }),
-
   gps: gpsSchema,
-
   idempotencyKey: z.string().uuid('idempotencyKey must be a UUID v4'),
-}).refine(
-  (v) => v.pollingUnit || v.ward || v.lga || v.state,
-  { message: 'At least one location field is required', path: ['state'] }
-);
-
-// Attaches to sub-schemas above; not used directly.
-const _unused = locationScopeSchema;
+});
 
 const listIncidentsSchema = z.object({
   election: objectId.optional(),
