@@ -9,18 +9,6 @@ const {
 } = require('../services/incidentEvidenceService');
 const { ROLES } = require('../utils/roleScope');
 
-/**
- * Validates that the caller can report against the requested geo level, and
- * resolves the full location context (state/lga/ward/pu + path) from the
- * deepest provided entity. Refuses to trust the client for shallow fields.
- *
- * Rules:
- *  - If pollingUnit is provided, all ancestors come from the PU doc.
- *  - Else if ward is provided, state+lga come from the ward doc.
- *  - Else if lga is provided, state comes from the LGA doc.
- *  - Else if state is provided, only state is set.
- *  - Caller must have access to the resolved state/lga/ward/PU.
- */
 async function resolveIncidentGeo({ pollingUnit, ward, lga, state }) {
   if (pollingUnit) {
     const pu = await models.PollingUnit.findById(pollingUnit).lean();
@@ -76,7 +64,6 @@ async function submit(req, res) {
   const body = req.body;
   const { user } = req;
 
-  // --- idempotency ---
   const existing = await models.Incident.findOne({
     reporter: user._id,
     idempotencyKey: body.idempotencyKey,
@@ -85,17 +72,14 @@ async function submit(req, res) {
     return res.status(200).json({ incident: existing.toJSON(), idempotentReplay: true });
   }
 
-  // --- resolve + authorize location ---
   const geo = await resolveIncidentGeo(body);
-  assertCanAccess(req, geo); // throws 403 if outside caller's scope
+  assertCanAccess(req, geo);
 
-  // --- election (optional) ---
   if (body.election) {
     const election = await models.Election.findById(body.election).lean();
     if (!election) throw ApiError.badRequest('Election not found');
   }
 
-  // --- evidence ---
   const photos = req.files?.photos || [];
   const videos = req.files?.videos || [];
 
@@ -108,7 +92,6 @@ async function submit(req, res) {
     idempotencyKey: body.idempotencyKey,
   });
 
-  // --- create ---
   const incident = await models.Incident.create({
     reporter: user._id,
     reporterRole: user.role,
@@ -155,15 +138,11 @@ async function submit(req, res) {
     severity: body.severity === 'CRITICAL' ? 'critical' : 'warning',
   });
 
-  // --- notify admins one level up the tree ---
   await notifySupervisors(geo, incident);
-
   res.status(201).json({ incident: incident.toJSON() });
 }
 
 async function notifySupervisors(geo, incident) {
-  // Ward-level incident → notify Ward Admin. LGA-level → LGA Admin. Etc.
-  // If the incident IS at state level, only the super admin sees it in the national queue.
   let recipientRole;
   let scopeField;
   let scopeId;
@@ -226,8 +205,8 @@ async function list(req, res) {
     if (q.to) filter.occurredAt.$lte = new Date(q.to);
   }
 
-  const page = q.page || 1;
-  const limit = q.limit || 50;
+  const page = parseInt(q.page, 10) || 1;
+  const limit = parseInt(q.limit, 10) || 50;
 
   const [items, total] = await Promise.all([
     models.Incident.find(filter)
@@ -279,7 +258,6 @@ async function assign(req, res) {
   const assignee = await models.User.findById(assignedTo).lean();
   if (!assignee || !assignee.isActive) throw ApiError.badRequest('Assignee not found or inactive');
 
-  // Assignee must be within the same or a narrower scope as the incident.
   const assigneeScope = assignee.scope || {};
   if (assigneeScope.state && !assigneeScope.state.equals(incident.state)) {
     throw ApiError.forbidden('Assignee is outside the incident state');
@@ -324,17 +302,15 @@ async function updateStatus(req, res) {
   if (!incident) throw ApiError.notFound('Incident not found');
   assertCanAccess(req, incident);
 
-  // Only assigned user or an admin above can transition
   const isAssignee = incident.assignedTo && incident.assignedTo.equals(req.user._id);
   const isAdminAbove = [ROLES.WARD_ADMIN, ROLES.LGA_ADMIN, ROLES.STATE_ADMIN, ROLES.NATIONAL_SUPER_ADMIN].includes(req.user.role);
   if (!isAssignee && !isAdminAbove) throw ApiError.forbidden('Only the assignee or an admin can change status');
 
-  // Valid transitions
   const TRANSITIONS = {
     OPEN: ['ACKNOWLEDGED', 'INVESTIGATING', 'DISMISSED'],
     ACKNOWLEDGED: ['INVESTIGATING', 'RESOLVED', 'DISMISSED'],
     INVESTIGATING: ['RESOLVED', 'DISMISSED'],
-    RESOLVED: ['DISMISSED'], // reopen requires a new incident
+    RESOLVED: ['DISMISSED'],
     DISMISSED: [],
   };
   const allowed = TRANSITIONS[incident.status] || [];
@@ -360,7 +336,6 @@ async function updateStatus(req, res) {
     req,
   });
 
-  // Notify reporter on resolution
   if (status === 'RESOLVED' || status === 'DISMISSED') {
     await models.Notification.create({
       recipient: incident.reporter,
@@ -376,4 +351,25 @@ async function updateStatus(req, res) {
   res.json({ incident: incident.toJSON() });
 }
 
-module.exports = { submit, list, getOne, assign, updateStatus };
+// =================================================================
+// GET MAP DATA (light payload for the dashboard heatmap)
+// =================================================================
+async function mapData(req, res) {
+  const { election } = req.query;
+  const filter = { ...scopeFilter(req) };
+  if (election) filter.election = election;
+
+  // Only fetch incidents that have GPS coordinates
+  filter['location.lat'] = { $exists: true, $ne: null };
+  filter['location.lng'] = { $exists: true, $ne: null };
+
+  const incidents = await models.Incident.find(filter)
+    .select('_id title type severity status location.lat location.lng occurredAt')
+    .sort({ occurredAt: -1 })
+    .limit(500)
+    .lean();
+
+  res.json({ incidents });
+}
+
+module.exports = { submit, list, getOne, assign, updateStatus, mapData };
