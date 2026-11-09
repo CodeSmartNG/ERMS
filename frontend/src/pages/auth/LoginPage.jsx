@@ -79,6 +79,10 @@ export default function LoginPage() {
             {busy ? 'Authenticating…' : 'Sign in to Dashboard'}
           </button>
 
+          <div className="mt-4">
+            <InstallAppButton className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-semibold text-white backdrop-blur-md transition-all hover:bg-white/10" />
+          </div>
+
           <p className="mt-6 text-center text-xs font-medium text-slate-400">
             Accounts are provisioned by your administrator.
           </p>
