@@ -1,72 +1,140 @@
-Layer Purpose
-Agent PWA Polling unit agents submit Form EC8A results and incident reports from the field — works fully offline
-Admin Dashboards Live national → state → LGA → ward → PU drill-down with real-time vote tallies
-Verification Workflow Ward Admins review photographic evidence and verify or flag submissions
-Collation Engine Automatically aggregates verified votes up the 5-level hierarchy with hash-chain integrity
-Incident Tracking Agents report violence, ballot snatching, and irregularities; admins triage and resolve
-CSV Exports Downloadable per-PU results and per-LGA collation summaries for external analysis
+CodeSmartNG ERMS
 
-Layer Technology
-Frontend React 18 + Vite + Tailwind CSS + React Router + Zustand
-PWA vite-plugin-pwa + IndexedDB (idb) + Workbox
-Backend Node.js + Express 4
-Database MongoDB Atlas (Mongoose)
-Auth JWT (access + refresh rotation) + bcrypt
-Storage Cloudinary (evidence photos + videos)
-Maps Leaflet + react-leaflet (incident heatmap)
-Deployment Vercel (frontend) + Render (backend)
+Election Results Management System
 
-ERMS/
-├── backend/
-│   ├── src/
-│   │   ├── config/           # env, database, cloudinary
-│   │   ├── models/           # User, State, LGA, Ward, PU, Election, Party, Candidate,
-│   │   │                     # Result, Incident, Collation, Notification, AuditLog
-│   │   ├── controllers/      # auth, election, result, incident, collation,
-│   │   │                     # party, candidate, geo, report, notification
-│   │   ├── routes/           # one per controller, wired in routes/index.js
-│   │   ├── middleware/       # auth, scope, rateLimiter, upload, validate, errorHandler
-│   │   ├── services/         # collation, evidence, incidentEvidence, audit, resultHash
-│   │   ├── utils/            # ApiError, asyncHandler, geo, roleScope, tokens
-│   │   ├── validators/       # Zod schemas for every route
-│   │   └── server.js
-│   ├── scripts/
-│   │   ├── seedGeo.js        # Load geo tree from CSV
-│   │   └── seedSuperAdmin.js # Bootstrap the first admin
-│   └── package.json
-│
-├── frontend/
-│   ├── src/
-│   │   ├── components/       # AppShell, PartyBar, ReportingRing, IncidentMap
-│   │   ├── context/          # AuthContext (user + tokens)
-│   │   ├── hooks/            # useApi (fetch + polling)
-│   │   ├── services/         # api, offlineQueue, syncService, notifications
-│   │   ├── pages/
-│   │   │   ├── auth/         # LoginPage
-│   │   │   ├── agent/        # AgentHome, SubmitResult, SubmitIncident, OfflineQueue
-│   │   │   └── admin/        # AdminDashboard, DashboardState/LGA/Ward,
-│   │   │                     # ResultsReview, IncidentsPage, ElectionsPage,
-│   │   │                     # PartiesPage, CandidatesPage, UsersPage
-│   │   ├── utils/            # roles
-│   │   └── App.jsx
-│   └── package.json
-│
-└── README.md
+Developed by CodeSmartNG
 
-Role Scope Can Do
-NATIONAL_SUPER_ADMIN All Nigeria Create elections (all levels), manage all users, view national dashboard, verify anything
-STATE_ADMIN Assigned state Create State/LGA/Ward elections, create LGA/Ward admins + agents, view state dashboard
-LGA_ADMIN Assigned LGA Create Ward admins + agents, view LGA dashboard, verify ward results
-WARD_ADMIN Assigned ward Create agents, verify PU results, manage incidents in ward
-POLLING_UNIT_AGENT Assigned PU Submit results + incidents for their PU only
-OBSERVER Read-only View all dashboards + results (no actions)
+CodeSmartNG ERMS is a web-based Election Results Management System designed to support election observation, polling-unit result reporting, evidence collection, verification, incident reporting and hierarchical results collation across Nigeria.
 
+The platform provides a structured system for managing election observation activities from polling units to national-level reporting.
 
-Level Type Scope Required
-FEDERAL President None (national)
-FEDERAL Senator State
-FEDERAL House of Reps State + LGA
-STATE Governor State
-STATE State Assembly State + LGA
-LOCAL_GOVERNMENT LGA Chairman State + LGA
-WARD Councillor State + LGA + Ward
+Live Demo: https://erms-frontend-mu.vercel.app/
+
+---
+
+1. Project Overview
+
+CodeSmartNG ERMS provides a centralised platform where authorised election observers and administrators can submit, review, verify and analyse election observation data.
+
+The system uses a hierarchical administrative structure to organise election information and control access to sensitive records.
+
+2. Key Features
+
+- Election management
+- Political party management
+- Candidate management
+- User and role management
+- Polling-unit result submission
+- Photographic evidence collection
+- Results verification
+- Results collation and reporting
+- Election incident reporting
+- Geographic administration
+- CSV report downloads
+- National dashboard and statistics
+- Role-based access control
+
+3. Administrative Structure
+
+The platform supports five administrative levels:
+
+Role| Responsibilities
+Super Admin| National administration and system oversight
+State Admin| Manages assigned state
+LGA Admin| Manages assigned Local Government Areas
+Ward Admin| Manages assigned wards
+Polling Unit Agent| Submits polling-unit reports and evidence
+
+4. Results Reporting Workflow
+
+1. Polling Unit Agent submits election results and photographic evidence.
+2. Ward Admin reviews submitted reports.
+3. Results are verified, flagged or rejected according to the workflow.
+4. Verified ward results are collated at LGA level.
+5. LGA results are collated at state level.
+6. State results are collated at national level.
+7. Authorised administrators access reports and statistics.
+
+5. Geographic Coverage
+
+The platform is designed for Nigeria's:
+
+- 36 states
+- Federal Capital Territory
+- 774 Local Government Areas
+- Electoral wards
+- Polling units
+
+Geographic access is controlled according to administrative responsibilities.
+
+6. Technology Stack
+
+Frontend
+
+- React
+- Vite
+- Tailwind CSS
+
+Backend
+
+- Node.js
+- Express.js
+- MongoDB
+- Mongoose
+- JWT Authentication
+
+Deployment
+
+- Vercel (Frontend)
+- Render (Backend)
+- MongoDB Atlas (Database)
+
+7. Dashboard and Reports
+
+The dashboard provides election-level statistics, including:
+
+- Polling units verified
+- Accredited voters
+- Total votes
+- Reporting percentage
+- Election reporting progress
+
+The system also supports downloadable CSV reports for authorised users.
+
+8. Security and Access Control
+
+The platform is designed with:
+
+- Authentication and role-based permissions
+- Geographic access restrictions
+- Password protection
+- Result submission history
+- Photographic evidence records
+- Verification workflows
+- Administrative access controls
+
+Security and data-integrity controls should be tested and independently reviewed before operational deployment.
+
+9. Intended Use
+
+CodeSmartNG ERMS is intended to support independent election observation, structured reporting, monitoring and results analysis.
+
+Important: CodeSmartNG ERMS is an independent software platform. It is not an official INEC platform and does not replace INEC's statutory election processes or official declarations. Results displayed on the platform represent submitted or verified observation data, not automatically certified election results.
+
+10. Live Platform
+
+Visit the demonstration platform:
+
+https://erms-frontend-mu.vercel.app/
+
+11. Developer
+
+CodeSmartNG
+
+Software Development | Technology | Digital Solutions
+
+Project: CodeSmartNG ERMS
+
+---
+
+Copyright © 2026 CodeSmartNG. All rights reserved.
