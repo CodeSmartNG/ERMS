@@ -7,7 +7,7 @@ const { ELECTION_STATUSES } = require('../models/Election');
 // LIST ELECTIONS
 // =================================================================
 async function list(req, res) {
-  const { status, type, page = 1, limit = 50 } = req.query;
+  const { status, type, level, page = 1, limit = 50 } = req.query;
 
   if (status && !ELECTION_STATUSES.includes(status)) {
     throw ApiError.badRequest(`status must be one of: ${ELECTION_STATUSES.join(', ')}`);
@@ -16,22 +16,18 @@ async function list(req, res) {
   const filter = {};
   if (status) filter.status = status;
   if (type) filter.type = type;
+  if (level) filter.level = level;
 
   const user = req.user;
   const userStateId = user.scope?.state || null;
 
   if (user.role === 'POLLING_UNIT_AGENT') {
     if (!filter.status) filter.status = 'ACTIVE';
-    if (userStateId) {
-      filter.$or = [
-        { states: { $size: 0 } },
-        { states: { $in: [userStateId] } },
-      ];
-    }
   } else if (userStateId) {
+    // State Admins see their state's elections + National elections
     filter.$or = [
-      { states: { $size: 0 } },
-      { states: { $in: [userStateId] } },
+      { level: 'FEDERAL', type: 'PRESIDENT' },
+      { state: userStateId },
     ];
   }
 
@@ -50,13 +46,13 @@ async function list(req, res) {
 // GET PARTIES FOR AN ELECTION
 // =================================================================
 async function parties(req, res) {
-  const election = await models.Election.findById(req.params.id).select('_id states').lean();
+  const election = await models.Election.findById(req.params.id).select('_id state level type').lean();
   if (!election) throw ApiError.notFound('Election not found');
 
   const user = req.user;
-  if (user.scope?.state && election.states.length > 0) {
-    const allowed = election.states.some((s) => s.equals(user.scope.state));
-    if (!allowed) throw ApiError.forbidden('Election is not active in your state');
+  // If a State Admin is trying to access an election in another state, block them
+  if (user.scope?.state && election.state && !election.state.equals(user.scope.state)) {
+    throw ApiError.forbidden('Election is not active in your state');
   }
 
   const partyIds = await models.Candidate.find({ election: election._id, isActive: true }).distinct('party');
@@ -73,18 +69,27 @@ async function parties(req, res) {
 // CREATE ELECTION
 // =================================================================
 async function create(req, res) {
-  const { code, title, type, electionDate, status, states } = req.body;
+  const { code, title, level, type, electionDate, status, state, lga, ward } = req.body;
 
   const existing = await models.Election.findOne({ code: code.toUpperCase() });
   if (existing) throw ApiError.conflict('Election code already exists');
 
+  // 1. Auto-assign State for State Admins
+  let finalState = state;
+  if (req.user.role === 'STATE_ADMIN' && req.user.scope?.state) {
+    finalState = req.user.scope.state;
+  }
+
   const election = await models.Election.create({
     code: code.toUpperCase(),
     title,
+    level,
     type,
+    state: finalState,
+    lga,
+    ward,
     electionDate: new Date(electionDate),
     status: status || 'DRAFT',
-    states: states || [],
     createdBy: req.user._id,
   });
 
@@ -92,7 +97,7 @@ async function create(req, res) {
     actor: req.user._id, actorRole: req.user.role,
     action: 'ELECTION_CREATED',
     entity: 'Election', entityId: election._id,
-    metadata: { code, title }, req,
+    metadata: { code, title, level, type }, req,
   });
 
   res.status(201).json({ election });
@@ -105,20 +110,25 @@ async function updateStatus(req, res) {
   const { status } = req.body;
   if (!ELECTION_STATUSES.includes(status)) throw ApiError.badRequest('Invalid status');
 
-  const election = await models.Election.findById(req.params.id);
-  if (!election) throw ApiError.notFound('Election not found');
+  try {
+    const election = await models.Election.findById(req.params.id);
+    if (!election) throw ApiError.notFound('Election not found');
 
-  election.status = status;
-  await election.save();
+    election.status = status;
+    await election.save();
 
-  await audit.log({
-    actor: req.user._id, actorRole: req.user.role,
-    action: 'ELECTION_STATUS_CHANGED',
-    entity: 'Election', entityId: election._id,
-    metadata: { status }, req,
-  });
+    await audit.log({
+      actor: req.user._id, actorRole: req.user.role,
+      action: 'ELECTION_STATUS_CHANGED',
+      entity: 'Election', entityId: election._id,
+      metadata: { status }, req,
+    });
 
-  res.json({ election });
+    res.json({ election });
+  } catch (err) {
+    // This will send the exact error to the app
+    res.status(400).json({ error: err.message });
+  }
 }
 
 module.exports = { list, parties, create, updateStatus };
