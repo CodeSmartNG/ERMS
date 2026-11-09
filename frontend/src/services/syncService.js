@@ -14,14 +14,26 @@ let intervalId = null;
  */
 function buildFormData(record) {
   const fd = new FormData();
+  
+  // Append payload fields
   for (const [k, v] of Object.entries(record.payload)) {
     if (v === undefined || v === null) continue;
     if (typeof v === 'object') fd.append(k, JSON.stringify(v));
     else fd.append(k, String(v));
   }
-  if (record.evidenceBlob) {
+
+  // Append evidence files (handles both old 'evidenceBlob' and new 'evidenceFiles')
+  if (record.evidenceFiles && record.evidenceFiles.length > 0) {
+    // New format: array of files
+    record.evidenceFiles.forEach((file) => {
+      const fieldName = record.kind === 'incident' ? 'photos' : 'evidence';
+      fd.append(fieldName, file.blob, file.name);
+    });
+  } else if (record.evidenceBlob) {
+    // Old format fallback (for any old queued items)
     fd.append('evidence', record.evidenceBlob, record.evidenceName || 'evidence.jpg');
   }
+  
   return fd;
 }
 
@@ -41,14 +53,17 @@ async function sendOne(record) {
   } catch (err) {
     const status = err.response?.status;
     const message = err.response?.data?.error || err.message;
-    // 4xx (except 408/429) = permanent; retrying won't help
-    const permanent = status && status >= 400 && status < 500 && status !== 408 && status !== 429;
+    
+    // 4xx (except 408/429) = permanent. Everything else (network drops, timeouts, 5xx) = retry.
+    // If there is NO response at all (network failure), status is undefined -> retry.
+    const isPermanent = status && status >= 400 && status < 500 && status !== 408 && status !== 429;
+    
     await updateStatus(record.localId, {
-      status: permanent ? QUEUE_STATUS.FAILED : QUEUE_STATUS.PENDING,
-      attempts: record.attempts + 1,
+      status: isPermanent ? QUEUE_STATUS.FAILED : QUEUE_STATUS.PENDING,
+      attempts: (record.attempts || 0) + 1,
       lastError: message,
     });
-    return { ok: false, permanent, error: message };
+    return { ok: false, permanent: isPermanent, error: message };
   }
 }
 
@@ -62,11 +77,7 @@ export async function flushQueue() {
     const all = await listQueue();
     const pending = all.filter((r) => r.status === QUEUE_STATUS.PENDING);
     for (const rec of pending) {
-      const result = await sendOne(rec);
-      if (result.ok) {
-        // Keep SENT records around for one session so the agent can see success
-        // and copy the server id. Purge them on next app launch.
-      }
+      await sendOne(rec);
     }
   } finally {
     running = false;
