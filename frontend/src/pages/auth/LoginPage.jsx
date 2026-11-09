@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { useAuth } from '@/context/AuthContext';
 import { HOME_BY_ROLE } from '@/utils/roles';
+import { ShieldCheck } from 'lucide-react';
 
 export default function LoginPage() {
   const { login } = useAuth();
@@ -17,7 +18,7 @@ export default function LoginPage() {
     setBusy(true);
     try {
       const user = await login(email.trim(), password);
-      toast.success(`Welcome, ${user.firstName}`);
+      toast.success(`Welcome back, ${user.firstName}`);
       navigate(HOME_BY_ROLE[user.role] || '/', { replace: true });
     } catch (err) {
       const msg = err.response?.data?.error || err.message || 'Login failed';
@@ -28,36 +29,44 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="flex min-h-screen flex-col justify-center bg-gradient-to-br from-brand-700 via-brand-600 to-brand-500 px-6 py-12">
-      <div className="mx-auto w-full max-w-md">
-        <div className="mb-8 text-center text-white">
-          <h1 className="text-3xl font-bold tracking-tight">CodeSmartNG ERMS</h1>
-          <p className="mt-2 text-sm text-white/80">Election Results Management System</p>
+    <div className="relative flex min-h-screen flex-col justify-center bg-slate-900 px-6 py-12 overflow-hidden">
+      
+      {/* Background Gradient Orbs */}
+      <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] rounded-full bg-brand-600/30 blur-[100px]" />
+      <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] rounded-full bg-brand-400/20 blur-[100px]" />
+
+      <div className="relative z-10 mx-auto w-full max-w-md animate-slide-up">
+        <div className="mb-10 text-center text-white">
+          <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-white/10 backdrop-blur-md border border-white/20 shadow-glow">
+            <ShieldCheck className="h-8 w-8 text-brand-400" />
+          </div>
+          <h1 className="font-display text-4xl font-bold tracking-tight">CodeSmartNG</h1>
+          <p className="mt-2 text-sm font-medium text-brand-200/80">Election Results Management System</p>
         </div>
 
-        <form onSubmit={onSubmit} className="card p-6">
-          <div className="space-y-4">
+        <form onSubmit={onSubmit} className="rounded-3xl border border-white/10 bg-white/5 p-8 shadow-2xl backdrop-blur-xl">
+          <div className="space-y-5">
             <div>
-              <label className="label" htmlFor="email">Email</label>
+              <label className="mb-2 block text-sm font-medium text-slate-300" htmlFor="email">Email Address</label>
               <input
                 id="email"
                 type="email"
                 autoComplete="email"
                 required
-                className="input"
+                className="block w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-white placeholder:text-slate-500 focus:border-brand-400 focus:ring-2 focus:ring-brand-400/30 focus:outline-none transition-all"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="you@example.com"
               />
             </div>
             <div>
-              <label className="label" htmlFor="password">Password</label>
+              <label className="mb-2 block text-sm font-medium text-slate-300" htmlFor="password">Password</label>
               <input
                 id="password"
                 type="password"
                 autoComplete="current-password"
                 required
-                className="input"
+                className="block w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-white placeholder:text-slate-500 focus:border-brand-400 focus:ring-2 focus:ring-brand-400/30 focus:outline-none transition-all"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="••••••••••"
@@ -65,16 +74,16 @@ export default function LoginPage() {
             </div>
           </div>
 
-          <button type="submit" disabled={busy} className="btn-primary mt-6 w-full">
-            {busy ? 'Signing in…' : 'Sign in'}
+          <button type="submit" disabled={busy} className="mt-8 w-full rounded-xl bg-brand-500 px-4 py-3.5 text-sm font-bold text-white shadow-[0_0_20px_rgba(34,197,94,0.3)] transition-all hover:bg-brand-400 hover:shadow-[0_0_25px_rgba(34,197,94,0.5)] active:scale-95 disabled:opacity-50">
+            {busy ? 'Authenticating…' : 'Sign in to Dashboard'}
           </button>
 
-          <p className="mt-4 text-center text-xs text-slate-500">
+          <p className="mt-6 text-center text-xs font-medium text-slate-400">
             Accounts are provisioned by your administrator.
           </p>
         </form>
 
-        <p className="mt-6 text-center text-xs text-white/60">
+        <p className="mt-10 text-center text-xs font-medium text-slate-500/60">
           Independent Election Observation · Nigeria
         </p>
       </div>
