@@ -4,6 +4,7 @@ import { ArrowLeft, Camera, Loader2, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { enqueue } from '@/services/offlineQueue';
 import { flushQueue } from '@/services/syncService';
+import { useAuth } from '@/context/AuthContext'; // <-- ADDED
 
 const TYPES = [
   ['VIOLENCE', 'Violence'],
@@ -21,6 +22,7 @@ const SEVERITIES = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'];
 
 export default function SubmitIncidentPage() {
   const navigate = useNavigate();
+  const { user } = useAuth(); // <-- ADDED
   const [submitting, setSubmitting] = useState(false);
   const [done, setDone] = useState(null);
 
@@ -31,7 +33,6 @@ export default function SubmitIncidentPage() {
   const [occurredAt, setOccurredAt] = useState(() => new Date(Date.now() - 15 * 60 * 1000).toISOString().slice(0, 16));
   const [photos, setPhotos] = useState([]);
 
-  // Append new photos to existing ones (up to 5 total)
   function onPhotosChange(e) {
     const files = Array.from(e.target.files || []);
     const valid = files.filter((f) => f.type.startsWith('image/') && f.size <= 8 * 1024 * 1024);
@@ -43,8 +44,6 @@ export default function SubmitIncidentPage() {
     }));
     
     setPhotos((prev) => [...prev, ...newPhotos].slice(0, 5));
-    
-    // Reset the input so you can select the same file again if needed
     e.target.value = '';
   }
 
@@ -68,12 +67,12 @@ export default function SubmitIncidentPage() {
           title: title.trim(),
           description: description.trim(),
           occurredAt: new Date(occurredAt).toISOString(),
+          pollingUnit: user?.scope?.pollingUnit, // <-- ADDED: Auto-assign location
           idempotencyKey: crypto.randomUUID(),
         },
         evidenceFiles: photos.map(p => ({ blob: p.blob, name: p.name })),
       });
 
-      // Always flush - sync service handles offline gracefully
       flushQueue().catch(() => {});
       setDone(record);
     } catch (err) {
