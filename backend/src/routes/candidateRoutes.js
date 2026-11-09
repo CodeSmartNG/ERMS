@@ -8,6 +8,11 @@ const router = express.Router();
 router.use(requireAuth);
 
 router.get('/', asyncHandler(ctrl.list));
-router.post('/', requireRole(ROLES.NATIONAL_SUPER_ADMIN), asyncHandler(ctrl.create));
+
+router.post(
+  '/', 
+  requireRole(ROLES.NATIONAL_SUPER_ADMIN, ROLES.STATE_ADMIN), // <--- Added STATE_ADMIN
+  asyncHandler(ctrl.create)
+);
 
 module.exports = router;

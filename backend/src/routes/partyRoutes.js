@@ -13,7 +13,7 @@ router.get('/', asyncHandler(ctrl.list));
 
 router.post(
   '/',
-  requireRole(ROLES.NATIONAL_SUPER_ADMIN),
+  requireRole(ROLES.NATIONAL_SUPER_ADMIN, ROLES.STATE_ADMIN), // <--- ADDED STATE_ADMIN
   validate(z.object({
     code: z.string().min(2).max(15),
     name: z.string().min(3).max(100),
