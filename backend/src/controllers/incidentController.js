@@ -72,7 +72,17 @@ async function submit(req, res) {
     return res.status(200).json({ incident: existing.toJSON(), idempotentReplay: true });
   }
 
-  const geo = await resolveIncidentGeo(body);
+  // Auto-assign location from agent's scope if not provided
+  let geo;
+  if (!body.pollingUnit && !body.ward && !body.lga && !body.state) {
+    if (user.scope?.pollingUnit) {
+      geo = await resolveIncidentGeo({ pollingUnit: user.scope.pollingUnit });
+    } else {
+      throw ApiError.badRequest('Location is required. Please select a polling unit.');
+    }
+  } else {
+    geo = await resolveIncidentGeo(body);
+  }
   assertCanAccess(req, geo);
 
   if (body.election) {
@@ -359,7 +369,6 @@ async function mapData(req, res) {
   const filter = { ...scopeFilter(req) };
   if (election) filter.election = election;
 
-  // Only fetch incidents that have GPS coordinates
   filter['location.lat'] = { $exists: true, $ne: null };
   filter['location.lng'] = { $exists: true, $ne: null };
 
