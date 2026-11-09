@@ -24,7 +24,6 @@ async function list(req, res) {
   if (user.role === 'POLLING_UNIT_AGENT') {
     if (!filter.status) filter.status = 'ACTIVE';
   } else if (userStateId) {
-    // State Admins see their state's elections + National elections
     filter.$or = [
       { level: 'FEDERAL', type: 'PRESIDENT' },
       { state: userStateId },
@@ -50,7 +49,6 @@ async function parties(req, res) {
   if (!election) throw ApiError.notFound('Election not found');
 
   const user = req.user;
-  // If a State Admin is trying to access an election in another state, block them
   if (user.scope?.state && election.state && !election.state.equals(user.scope.state)) {
     throw ApiError.forbidden('Election is not active in your state');
   }
@@ -74,8 +72,14 @@ async function create(req, res) {
   const existing = await models.Election.findOne({ code: code.toUpperCase() });
   if (existing) throw ApiError.conflict('Election code already exists');
 
-  // 1. Auto-assign State for State Admins
-  let finalState = state;
+  // Helper to convert empty strings to null
+  const cleanId = (val) => (val && typeof val === 'string' && val.trim() !== '') ? val : null;
+
+  let finalState = cleanId(state);
+  const finalLga = cleanId(lga);
+  const finalWard = cleanId(ward);
+
+  // Auto-assign State for State Admins
   if (req.user.role === 'STATE_ADMIN' && req.user.scope?.state) {
     finalState = req.user.scope.state;
   }
@@ -86,8 +90,8 @@ async function create(req, res) {
     level,
     type,
     state: finalState,
-    lga,
-    ward,
+    lga: finalLga,
+    ward: finalWard,
     electionDate: new Date(electionDate),
     status: status || 'DRAFT',
     createdBy: req.user._id,
@@ -126,7 +130,6 @@ async function updateStatus(req, res) {
 
     res.json({ election });
   } catch (err) {
-    // This will send the exact error to the app
     res.status(400).json({ error: err.message });
   }
 }
