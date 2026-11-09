@@ -1,5 +1,20 @@
 import { MapContainer, TileLayer, CircleMarker, Popup } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
+import L from 'leaflet';
+
+// --- Leaflet Icon Fix ---
+// This prevents the "Cannot read properties of undefined" error in Vite builds
+import icon from 'leaflet/dist/images/marker-icon.png';
+import iconShadow from 'leaflet/dist/images/marker-shadow.png';
+
+let DefaultIcon = L.icon({
+  iconUrl: icon,
+  shadowUrl: iconShadow,
+  iconSize: [25, 41],
+  iconAnchor: [12, 41],
+});
+L.Marker.prototype.options.icon = DefaultIcon;
+// ------------------------
 
 const SEVERITY_COLOR = {
   LOW: '#3b82f6',      // Blue
@@ -8,9 +23,14 @@ const SEVERITY_COLOR = {
   CRITICAL: '#7f1d1d', // Dark Red
 };
 
-export default function IncidentMap({ incidents }) {
+export default function IncidentMap({ incidents = [] }) {
   // Nigeria Center Point
   const center = [9.0820, 8.6753];
+
+  // Filter out any incidents without valid GPS coordinates
+  const validIncidents = incidents.filter(
+    (inc) => inc.location?.lat && inc.location?.lng
+  );
 
   return (
     <div className="h-[500px] w-full rounded-xl overflow-hidden border border-slate-200">
@@ -20,7 +40,7 @@ export default function IncidentMap({ incidents }) {
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
         
-        {incidents.map((inc) => (
+        {validIncidents.map((inc) => (
           <CircleMarker
             key={inc._id}
             center={[inc.location.lat, inc.location.lng]}
