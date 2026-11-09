@@ -44,8 +44,16 @@ async function submit(req, res) {
   if (election.status !== 'ACTIVE') {
     throw ApiError.badRequest(`Election is ${election.status}; submissions only open when ACTIVE`);
   }
-  if (election.states.length > 0 && !election.states.some((s) => s.equals(geo.state))) {
+
+  // NEW LOGIC: Ensure the election applies to this agent's geographic scope
+  if (election.level === 'FEDERAL' && election.type === 'PRESIDENT') {
+    // National election, no state check needed
+  } else if (election.state && !election.state.equals(geo.state)) {
     throw ApiError.badRequest('Election is not active in this state');
+  } else if (election.lga && !election.lga.equals(geo.lga)) {
+    throw ApiError.badRequest('Election is not active in this LGA');
+  } else if (election.ward && !election.ward.equals(geo.ward)) {
+    throw ApiError.badRequest('Election is not active in this ward');
   }
 
   const existing = await models.Result.findOne({
@@ -240,8 +248,8 @@ async function list(req, res) {
     filter.pollingUnit = req.user.scope.pollingUnit;
   }
 
-  const page = q.page || 1;
-  const limit = q.limit || 50;
+  const page = parseInt(q.page, 10) || 1;
+  const limit = parseInt(q.limit, 10) || 50;
   const skip = (page - 1) * limit;
 
   const [items, total] = await Promise.all([
