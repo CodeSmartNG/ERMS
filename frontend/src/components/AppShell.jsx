@@ -13,9 +13,12 @@ const ALL_NAV = [
   { to: '/admin/dashboard', label: 'Dashboard', icon: LayoutDashboard, allowed: [ROLES.NATIONAL_SUPER_ADMIN, ROLES.STATE_ADMIN, ROLES.LGA_ADMIN, ROLES.WARD_ADMIN, ROLES.OBSERVER] },
   { to: '/admin/results', label: 'Results', icon: ClipboardCheck, allowed: [ROLES.NATIONAL_SUPER_ADMIN, ROLES.STATE_ADMIN, ROLES.LGA_ADMIN, ROLES.WARD_ADMIN, ROLES.OBSERVER] },
   { to: '/admin/incidents', label: 'Incidents', icon: AlertTriangle, allowed: [ROLES.NATIONAL_SUPER_ADMIN, ROLES.STATE_ADMIN, ROLES.LGA_ADMIN, ROLES.WARD_ADMIN, ROLES.OBSERVER] },
-  { to: '/admin/elections', label: 'Elections', icon: Vote, allowed: [ROLES.NATIONAL_SUPER_ADMIN] },
-  { to: '/admin/parties', label: 'Parties', icon: Flag, allowed: [ROLES.NATIONAL_SUPER_ADMIN] },
-  { to: '/admin/candidates', label: 'Candidates', icon: Users, allowed: [ROLES.NATIONAL_SUPER_ADMIN] },
+  
+  // Added STATE_ADMIN to the next three lines:
+  { to: '/admin/elections', label: 'Elections', icon: Vote, allowed: [ROLES.NATIONAL_SUPER_ADMIN, ROLES.STATE_ADMIN] },
+  { to: '/admin/parties', label: 'Parties', icon: Flag, allowed: [ROLES.NATIONAL_SUPER_ADMIN, ROLES.STATE_ADMIN] },
+  { to: '/admin/candidates', label: 'Candidates', icon: Users, allowed: [ROLES.NATIONAL_SUPER_ADMIN, ROLES.STATE_ADMIN] },
+  
   { to: '/admin/users', label: 'User Management', icon: UserPlus, allowed: [ROLES.NATIONAL_SUPER_ADMIN, ROLES.STATE_ADMIN, ROLES.LGA_ADMIN, ROLES.WARD_ADMIN] },
 ];
 
