@@ -1,59 +1,56 @@
 import { useEffect, useState } from 'react';
 import { Download } from 'lucide-react';
+import { toast } from 'sonner';
 
 export default function InstallAppButton({ className = 'btn-primary' }) {
   const [deferredPrompt, setDeferredPrompt] = useState(null);
-  const [isInstalled, setIsInstalled] = useState(false);
+  const [isStandalone, setIsStandalone] = useState(false);
 
   useEffect(() => {
-    // Check if the app is already installed (standalone mode)
-    if (window.matchMedia('(display-mode: standalone)').matches) {
-      setIsInstalled(true);
-      return;
-    }
+    // Check if we are running as an installed app
+    const isApp = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
+    setIsStandalone(isApp);
 
     const handler = (e) => {
-      // Prevent the default mini-infobar from appearing
       e.preventDefault();
-      // Stash the event so it can be triggered later
       setDeferredPrompt(e);
     };
 
     window.addEventListener('beforeinstallprompt', handler);
 
-    // Listen for successful installation
-    window.addEventListener('appinstalled', () => {
-      setIsInstalled(true);
-      setDeferredPrompt(null);
-    });
-
-    return () => {
-      window.removeEventListener('beforeinstallprompt', handler);
-    };
+    return () => window.removeEventListener('beforeinstallprompt', handler);
   }, []);
 
   async function handleInstall() {
-    if (!deferredPrompt) {
-      alert('To install this app, tap your browser menu (⋮) and select "Add to Home Screen" or "Install App".');
-      return;
+    if (deferredPrompt) {
+      // Android / Desktop Chrome: trigger native install prompt
+      deferredPrompt.prompt();
+      const { outcome } = await deferredPrompt.userChoice;
+      if (outcome === 'accepted') {
+        toast.success('App installed successfully!');
+      }
+      setDeferredPrompt(null);
+    } else {
+      // iOS or already installed or unsupported
+      const ua = navigator.userAgent.toLowerCase();
+      if (ua.includes('iphone') || ua.includes('ipad')) {
+        toast.info('Tap the Share icon and select "Add to Home Screen" to install.', { duration: 6000 });
+      } else {
+        toast.info('Tap the browser menu (⋮) and select "Install App" or "Add to Home Screen".', { duration: 6000 });
+      }
     }
-
-    deferredPrompt.prompt();
-    const { outcome } = await deferredPrompt.userChoice;
-    
-    if (outcome === 'accepted') {
-      setIsInstalled(true);
-    }
-    setDeferredPrompt(null);
   }
 
-  if (isInstalled) {
-    return null; // Don't show the button if the app is already installed
-  }
+  // Hide the button only if the app is already installed and running as a PWA
+  if (isStandalone) return null;
 
   return (
-    <button onClick={handleInstall} className={`${className} flex items-center justify-center gap-2`}>
-      <Download className="h-5 w-5" />
+    <button 
+      type="button"
+      onClick={handleInstall} 
+      className={`${className} flex items-center justify-center gap-2`}
+    >
+      <Download className="h-4 w-4" />
       Download App
     </button>
   );
