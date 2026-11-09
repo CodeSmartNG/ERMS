@@ -4,6 +4,7 @@ import { toast } from 'sonner';
 import { useAuth } from '@/context/AuthContext';
 import { HOME_BY_ROLE } from '@/utils/roles';
 import { ShieldCheck } from 'lucide-react';
+import InstallAppButton from '@/components/InstallAppButton';
 
 export default function LoginPage() {
   const { login } = useAuth();
