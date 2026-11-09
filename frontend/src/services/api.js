@@ -95,6 +95,7 @@ export const resultsApi = {
 
 export const incidentsApi = {
   list: (params) => api.get('/incidents', { params }),
+  mapData: (params) => api.get('/incidents/map-data', { params }), // <--- ADDED FOR HEATMAP
   get: (id) => api.get(`/incidents/${id}`),
   assign: (id, assignedTo) => api.patch(`/incidents/${id}/assign`, { assignedTo }),
   updateStatus: (id, status, notes) => api.patch(`/incidents/${id}/status`, { status, notes }),
@@ -131,8 +132,7 @@ export const candidatesApi = {
   create: (data) => api.post('/candidates', data),
 };
 
-// ---- UPDATED GEO API ----
-// Notice we added `.then(r => r.data.xxx)` so the page receives a clean array.
+// ---- GEO API ----
 export const geoApi = {
   states: () => api.get('/geo/states').then(r => r.data.states),
   lgas: (stateCode) => api.get(`/geo/states/${stateCode}/lgas`).then(r => r.data.lgas),
@@ -141,11 +141,9 @@ export const geoApi = {
 };
 
 export const reportsApi = {
-  // Returns the full download URL for a CSV
   resultsCsvUrl: (electionId) => `${import.meta.env.VITE_API_URL || 'http://localhost:5000/api'}/reports/${electionId}/results.csv`,
   collationCsvUrl: (electionId) => `${import.meta.env.VITE_API_URL || 'http://localhost:5000/api'}/reports/${electionId}/collation.csv`,
 
-  // Helper to download with auth header — browsers don't send auth on <a href>
   download: async (url, filename) => {
     const { tokens } = await import('./api');
     const token = tokens.access;

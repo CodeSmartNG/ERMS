@@ -6,6 +6,7 @@ import api, { collationApi, reportsApi } from '@/services/api';
 import { useAuth } from '@/context/AuthContext';
 import PartyBar from '@/components/PartyBar';
 import ReportingRing from '@/components/ReportingRing';
+import IncidentMap from '@/components/IncidentMap';
 
 const ROLE_LABELS_LOOKUP = {
   NATIONAL_SUPER_ADMIN: 'National',
