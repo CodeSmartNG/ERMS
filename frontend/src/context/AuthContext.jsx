@@ -1,6 +1,5 @@
 import { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import { authApi, tokens } from '@/services/api';
-import { clearQueue } from '@/services/offlineQueue'; // <--- ADD THIS IMPORT
 
 const AuthContext = createContext(null);
 
@@ -33,9 +32,10 @@ export function AuthProvider({ children }) {
   const logout = useCallback(async () => {
     try { await authApi.logout(tokens.refresh); } catch { /* best-effort */ }
     
-    // Clear tokens and the local offline queue
+    // Clear tokens only. 
+    // We DO NOT clear the offline queue so the agent can see their history
+    // when they log back in on the same device.
     tokens.clear();
-    await clearQueue(); // <--- ADD THIS LINE
     setUser(null);
   }, []);
 
