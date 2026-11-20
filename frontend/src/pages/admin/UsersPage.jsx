@@ -1,9 +1,34 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Component } from 'react';
 import { toast } from 'sonner';
 import { AlertCircle, RefreshCw } from 'lucide-react';
 import { useApi } from '@/hooks/useApi';
 import { usersApi, geoApi, partiesApi } from '@/services/api';
 import { useAuth } from '@/context/AuthContext';
+
+// 🚨 ERROR BOUNDARY - This will show us the error instead of a blank page
+class ErrorBoundary extends Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div style={{ padding: '20px', color: 'red', background: '#ffeeee', minHeight: '100vh' }}>
+          <h1 style={{ fontSize: '24px', fontWeight: 'bold' }}>⚠️ Page Crashed</h1>
+          <p style={{ marginTop: '10px', fontFamily: 'monospace' }}>{this.state.error.toString()}</p>
+          <pre style={{ marginTop: '20px', padding: '10px', background: 'white', fontSize: '12px', overflow: 'auto' }}>
+            {this.state.error.stack}
+          </pre>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 const CREATABLE_ROLES = {
   NATIONAL_SUPER_ADMIN: ['STATE_ADMIN', 'PARTY_ADMIN', 'LGA_ADMIN', 'WARD_ADMIN', 'POLLING_UNIT_AGENT'],
@@ -25,7 +50,7 @@ const ROLE_NEEDS_PARTY = new Set([
   'PARTY_ADMIN', 'LGA_ADMIN', 'WARD_ADMIN', 'POLLING_UNIT_AGENT',
 ]);
 
-export default function UsersPage() {
+function UsersPageContent() {
   const { user } = useAuth();
 
   const allowedRoles = CREATABLE_ROLES[user.role] || [];
@@ -45,11 +70,8 @@ export default function UsersPage() {
 
   const [busy, setBusy] = useState(false);
 
-  // ⬇️ FIXED — renamed to `partiesHook` to avoid shadowing the imported `partiesApi`
   const partiesHook = useApi(() => partiesApi.list(), [], { initial: [] });
-  
-  // ⬇️ SAFE FALLBACK — prevents crashes if the API fails or returns undefined
-  const safeParties = partiesHook.data || [];
+  const safeParties = partiesHook.data || []; 
 
   const statesApi   = useApi(() => geoApi.states(), [], { initial: [] });
   const lgasApi     = useApi(() => stateCode ? geoApi.lgas(stateCode) : Promise.resolve([]), [stateCode], { initial: [] });
@@ -275,5 +297,14 @@ export default function UsersPage() {
         </button>
       </form>
     </div>
+  );
+}
+
+// 🚨 WRAPPER
+export default function UsersPage() {
+  return (
+    <ErrorBoundary>
+      <UsersPageContent />
+    </ErrorBoundary>
   );
 }
