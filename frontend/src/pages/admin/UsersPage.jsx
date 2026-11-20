@@ -5,7 +5,6 @@ import { useApi } from '@/hooks/useApi';
 import { usersApi, geoApi, partiesApi } from '@/services/api';
 import { useAuth } from '@/context/AuthContext';
 
-// ⬇️ UPDATED — multi-party hierarchy
 const CREATABLE_ROLES = {
   NATIONAL_SUPER_ADMIN: ['STATE_ADMIN', 'PARTY_ADMIN', 'LGA_ADMIN', 'WARD_ADMIN', 'POLLING_UNIT_AGENT'],
   STATE_ADMIN:          ['PARTY_ADMIN', 'LGA_ADMIN', 'WARD_ADMIN', 'POLLING_UNIT_AGENT'],
@@ -22,7 +21,6 @@ const ROLE_LABELS = {
   POLLING_UNIT_AGENT: 'Polling Unit Agent',
 };
 
-// Roles that require a Party assignment
 const ROLE_NEEDS_PARTY = new Set([
   'PARTY_ADMIN', 'LGA_ADMIN', 'WARD_ADMIN', 'POLLING_UNIT_AGENT',
 ]);
@@ -38,10 +36,8 @@ export default function UsersPage() {
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
 
-  // ⬇️ NEW — party scope
   const [partyId, setPartyId] = useState('');
 
-  // Geo states
   const [stateCode, setStateCode] = useState('');
   const [lgaCode, setLgaCode] = useState('');
   const [wardCode, setWardCode] = useState('');
@@ -49,27 +45,28 @@ export default function UsersPage() {
 
   const [busy, setBusy] = useState(false);
 
-  // ⬇️ FIXED — renamed to avoid collision with imported partiesApi
+  // ⬇️ FIXED — renamed to `partiesHook` to avoid shadowing the imported `partiesApi`
   const partiesHook = useApi(() => partiesApi.list(), [], { initial: [] });
+  
+  // ⬇️ SAFE FALLBACK — prevents crashes if the API fails or returns undefined
+  const safeParties = partiesHook.data || [];
+
   const statesApi   = useApi(() => geoApi.states(), [], { initial: [] });
   const lgasApi     = useApi(() => stateCode ? geoApi.lgas(stateCode) : Promise.resolve([]), [stateCode], { initial: [] });
   const wardsApi    = useApi(() => lgaCode ? geoApi.wards(lgaCode) : Promise.resolve([]), [lgaCode], { initial: [] });
   const pusApi      = useApi(() => wardCode ? geoApi.pollingUnits(wardCode) : Promise.resolve([]), [wardCode], { initial: [] });
 
-  // Locks
   const isPartyLocked = user.role !== 'NATIONAL_SUPER_ADMIN' && !!user.scope?.party;
   const isStateLocked = user.role !== 'NATIONAL_SUPER_ADMIN' && !!user.scope?.state;
   const isLgaLocked   = user.role === 'LGA_ADMIN' || user.role === 'WARD_ADMIN';
 
-  // Auto-fill party if locked
   useEffect(() => {
-    if (isPartyLocked && user.scope?.party && partiesHook.data.length > 0) {
-      const p = partiesHook.data.find(x => x._id === user.scope.party);
+    if (isPartyLocked && user.scope?.party && safeParties.length > 0) {
+      const p = safeParties.find(x => x._id === user.scope.party);
       if (p) setPartyId(p._id);
     }
-  }, [isPartyLocked, user.scope?.party, partiesHook.data]);
+  }, [isPartyLocked, user.scope?.party, safeParties]);
 
-  // Auto-fill state code if locked
   useEffect(() => {
     if (isStateLocked && user.scope?.state && statesApi.data.length > 0) {
       const s = statesApi.data.find(x => x._id === user.scope.state);
@@ -77,7 +74,6 @@ export default function UsersPage() {
     }
   }, [isStateLocked, user.scope?.state, statesApi.data]);
 
-  // Auto-fill lga code if locked
   useEffect(() => {
     if (isLgaLocked && user.scope?.lga && lgasApi.data.length > 0) {
       const l = lgasApi.data.find(x => x._id === user.scope.lga);
@@ -85,14 +81,14 @@ export default function UsersPage() {
     }
   }, [isLgaLocked, user.scope?.lga, lgasApi.data]);
 
-  // Reset lower dropdowns when parent changes
   useEffect(() => { if (!isLgaLocked) { setLgaCode(''); setWardCode(''); setPuId(''); } }, [stateCode, isLgaLocked]);
   useEffect(() => { setWardCode(''); setPuId(''); }, [lgaCode]);
   useEffect(() => { setPuId(''); }, [wardCode]);
 
-  // Clear party when switching away from a party role (if not locked)
   useEffect(() => {
-    if (!ROLE_NEEDS_PARTY.has(role) && !isPartyLocked) setPartyId('');
+    if (!ROLE_NEEDS_PARTY.has(role) && !isPartyLocked) {
+      setPartyId('');
+    }
   }, [role, isPartyLocked]);
 
   async function handleCreate(e) {
@@ -106,7 +102,6 @@ export default function UsersPage() {
 
       const scope = {};
 
-      // Party (required for PARTY_ADMIN and below)
       if (ROLE_NEEDS_PARTY.has(role)) {
         if (!resolvedPartyId) {
           toast.error('Please select a party');
@@ -116,19 +111,15 @@ export default function UsersPage() {
         scope.party = resolvedPartyId;
       }
 
-      // State
       if (['STATE_ADMIN', 'PARTY_ADMIN', 'LGA_ADMIN', 'WARD_ADMIN', 'POLLING_UNIT_AGENT'].includes(role)) {
         scope.state = stateId;
       }
-      // LGA
       if (['LGA_ADMIN', 'WARD_ADMIN', 'POLLING_UNIT_AGENT'].includes(role)) {
         scope.lga = lgaId;
       }
-      // Ward
       if (['WARD_ADMIN', 'POLLING_UNIT_AGENT'].includes(role)) {
         scope.ward = wardId;
       }
-      // PU
       if (role === 'POLLING_UNIT_AGENT') {
         scope.pollingUnit = puId;
       }
@@ -144,7 +135,6 @@ export default function UsersPage() {
     } finally { setBusy(false); }
   }
 
-  // Role requirements
   const needsParty = ROLE_NEEDS_PARTY.has(role);
   const needsState = ['STATE_ADMIN', 'PARTY_ADMIN', 'LGA_ADMIN', 'WARD_ADMIN', 'POLLING_UNIT_AGENT'].includes(role);
   const needsLga   = ['LGA_ADMIN', 'WARD_ADMIN', 'POLLING_UNIT_AGENT'].includes(role);
@@ -213,7 +203,6 @@ export default function UsersPage() {
         <h2 className="font-semibold pt-2 border-t border-slate-200 mt-4">Assign Scope</h2>
         <div className="grid grid-cols-2 gap-4">
 
-          {/* Party */}
           {needsParty && (
             <div>
               <label className="label">Party</label>
@@ -227,9 +216,9 @@ export default function UsersPage() {
                 <option value="">
                   {partiesHook.loading ? 'Loading parties...' : 'Select Party…'}
                 </option>
-                {partiesHook.data.map(p => (
+                {safeParties.map(p => (
                   <option key={p._id} value={p._id}>
-                    {p.abbreviation} — {p.name}
+                    {p.abbreviation || p.code} — {p.name}
                   </option>
                 ))}
               </select>
@@ -264,7 +253,7 @@ export default function UsersPage() {
               <label className="label">Ward</label>
               <select required className="input" value={wardCode} onChange={e => setWardCode(e.target.value)} disabled={!lgaCode}>
                 <option value="">Select Ward…</option>
-                {wardsApi.data.map(w => <option key={w._id} value={w.code}>{w.name}</option>)}
+                {wardsApi.data.map(w => <option key={w.code} value={w.code}>{w.name}</option>)}
               </select>
             </div>
           )}
