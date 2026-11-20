@@ -19,6 +19,29 @@ function invalidateCollation(result, actorId, context) {
 }
 
 // =================================================================
+// Helpers — multi-tenant isolation
+// =================================================================
+
+// Roles that can see OTHER parties' votes within their scope
+const CROSS_PARTY_ROLES = new Set([
+  ROLES.NATIONAL_SUPER_ADMIN,
+  ROLES.STATE_ADMIN,
+  ROLES.OBSERVER,
+]);
+
+// Strip other parties' votes for party-scoped roles
+function sanitizePartyVotes(result, user) {
+  if (!result || !result.partyVotes) return result;
+  if (CROSS_PARTY_ROLES.has(user.role)) return result;
+  const userParty = user.scope?.party?.toString();
+  if (!userParty) return result;
+  result.partyVotes = result.partyVotes.filter(
+    (pv) => pv.party.toString() === userParty
+  );
+  return result;
+}
+
+// =================================================================
 // SUBMIT (agent only, own PU)
 // =================================================================
 async function submit(req, res) {
@@ -33,6 +56,10 @@ async function submit(req, res) {
     if (!scope.pollingUnit || !scope.pollingUnit.equals(body.pollingUnit)) {
       throw ApiError.forbidden('You may only submit results for your assigned polling unit');
     }
+    // ⬇️ NEW — agent must have a party assigned
+    if (!scope.party) {
+      throw ApiError.forbidden('Your account has no party assigned; contact your Ward Admin');
+    }
   }
 
   if (!req.file) throw ApiError.badRequest('Evidence photo is required (field: evidence)');
@@ -45,27 +72,35 @@ async function submit(req, res) {
     throw ApiError.badRequest(`Election is ${election.status}; submissions only open when ACTIVE`);
   }
 
-  // NEW LOGIC: Ensure the election applies to this agent's geographic scope
-  if (election.level === 'FEDERAL' && election.type === 'PRESIDENT') {
-    // National election, no state check needed
-  } else if (election.state && !election.state.equals(geo.state)) {
+  // ⬇️ FIXED — use the new Election schema (scope/state/lga/ward), not old `level`
+  if (election.scope === 'NATIONAL') {
+    // National election — no geo check
+  } else if (election.scope === 'STATE' && election.state && !election.state.equals(geo.state)) {
     throw ApiError.badRequest('Election is not active in this state');
-  } else if (election.lga && !election.lga.equals(geo.lga)) {
+  } else if (election.scope === 'LGA' && election.lga && !election.lga.equals(geo.lga)) {
     throw ApiError.badRequest('Election is not active in this LGA');
-  } else if (election.ward && !election.ward.equals(geo.ward)) {
+  } else if (election.scope === 'WARD' && election.ward && !election.ward.equals(geo.ward)) {
     throw ApiError.badRequest('Election is not active in this ward');
   }
+  // ⬆️
 
+  // ⬇️ FIXED — idempotency check now includes party
+  const submitterParty = user.scope?.party || null;
   const existing = await models.Result.findOne({
     election: body.election,
     idempotencyKey: body.idempotencyKey,
+    // Only scope by party if the submitter has one (Super Admin may not)
+    ...(submitterParty ? { party: submitterParty } : {}),
   });
   if (existing) {
     return res.status(200).json({ result: existing.toJSON(), idempotentReplay: true });
   }
+  // ⬆️
 
   const sumVotes = body.partyVotes.reduce((s, p) => s + p.votes, 0);
-  if (sumVotes <= 0) throw ApiError.badRequest('Sum of party votes must be positive');
+  // ⬇️ CHANGED — allow 0 for boycotted PUs; reject only negative
+  if (sumVotes < 0) throw ApiError.badRequest('Sum of party votes cannot be negative');
+  // ⬆️
   if (body.accreditedVoters > body.registeredVoters) {
     throw ApiError.badRequest('accreditedVoters cannot exceed registeredVoters');
   }
@@ -92,9 +127,19 @@ async function submit(req, res) {
   const validPartySet = new Set(candidateParties.map(String));
   for (const pv of body.partyVotes) {
     if (!validPartySet.has(pv.party)) {
-      throw ApiError.badRequest(`Party ${partyCodeById.get(pv.party)} has no candidate in this election`);
+      throw ApiError.badRequest(
+        `Party ${partyCodeById.get(pv.party)} has no candidate in this election`
+      );
     }
   }
+
+  // ⬇️ NEW — agent's own party must have a candidate in this election
+  if (user.role === ROLES.POLLING_UNIT_AGENT && submitterParty) {
+    if (!validPartySet.has(submitterParty.toString())) {
+      throw ApiError.badRequest('Your party has no candidate in this election');
+    }
+  }
+  // ⬆️
 
   const { buffer, hash: evidenceHash } = await prepareImage(req.file.buffer);
   const uploaded = await uploadEvidence({
@@ -113,14 +158,19 @@ async function submit(req, res) {
 
   try {
     await session.withTransaction(async () => {
-      const current = await models.Result.findOne({
+      // ⬇️ FIXED — scope "current" lookup by party too
+      const currentFilter = {
         election: body.election,
         pollingUnit: body.pollingUnit,
         isCurrent: true,
-      })
+      };
+      if (submitterParty) currentFilter.party = submitterParty;
+
+      const current = await models.Result.findOne(currentFilter)
         .sort({ version: -1 })
         .session(session)
         .lean();
+      // ⬆️
 
       wasRevision = !!current;
       version = current ? current.version + 1 : 1;
@@ -128,6 +178,7 @@ async function submit(req, res) {
 
       resultDoc = new models.Result({
         election: body.election,
+        party: submitterParty,              // ⬅️ NEW — the submitting party
         pollingUnit: body.pollingUnit,
         state: geo.state,
         lga: geo.lga,
@@ -195,6 +246,7 @@ async function submit(req, res) {
     entityId: resultDoc._id,
     metadata: {
       election: body.election,
+      party: submitterParty,
       pollingUnit: body.pollingUnit,
       version,
       totalVotesCast: body.totalVotesCast,
@@ -204,20 +256,25 @@ async function submit(req, res) {
     req,
   });
 
-  const wardAdmin = await models.User.findOne({
+  // ⬇️ FIXED — Ward Admin lookup now also scoped by party
+  const wardAdminQuery = {
     role: ROLES.WARD_ADMIN,
     'scope.ward': geo.ward,
     isActive: true,
-  })
-    .select('_id')
-    .lean();
+  };
+  if (submitterParty) wardAdminQuery['scope.party'] = submitterParty;
+
+  const wardAdmin = await models.User.findOne(wardAdminQuery).select('_id').lean();
+  // ⬆️
 
   if (wardAdmin) {
     await models.Notification.create({
       recipient: wardAdmin._id,
       type: 'RESULT_SUBMITTED',
       title: 'New result submitted',
-      body: `PU ${geo.puCode} submitted a result for election ${election.code}`,
+      // ⬇️ FIXED — election has `name`, not `code`
+      body: `PU ${geo.puCode} submitted a result for ${election.name}`,
+      // ⬆️
       link: `/results/${resultDoc._id}`,
       refModel: 'Result',
       refId: resultDoc._id,
@@ -225,7 +282,12 @@ async function submit(req, res) {
   }
 
   invalidateCollation(resultDoc, user._id, 'submit');
-  res.status(201).json({ result: resultDoc.toJSON() });
+
+  // ⬇️ Sanitize outgoing payload
+  const payload = resultDoc.toJSON();
+  sanitizePartyVotes(payload, user);
+  res.status(201).json({ result: payload });
+  // ⬆️
 }
 
 // =================================================================
@@ -234,6 +296,14 @@ async function submit(req, res) {
 async function list(req, res) {
   const q = req.query;
   const filter = { ...scopeFilter(req) };
+
+  // ⬇️ NEW — party isolation for non-cross-party roles
+  if (!CROSS_PARTY_ROLES.has(req.user.role)) {
+    const userParty = req.user.scope?.party;
+    if (!userParty) throw ApiError.forbidden('Your account has no party scope assigned');
+    filter.party = userParty;
+  }
+  // ⬆️
 
   if (q.election) filter.election = q.election;
   if (q.pollingUnit) filter.pollingUnit = q.pollingUnit;
@@ -257,11 +327,16 @@ async function list(req, res) {
       .sort({ submittedAt: -1 })
       .skip(skip)
       .limit(limit)
-      .populate('election', 'code title type')
+      .populate('election', 'name type scope year')   // ⬅️ FIXED — new Election fields
       .populate('pollingUnit', 'code name')
+      .populate('party', 'name code abbreviation color')   // ⬅️ NEW
       .lean(),
     models.Result.countDocuments(filter),
   ]);
+
+  // ⬇️ NEW — sanitize partyVotes for party-scoped roles
+  for (const item of items) sanitizePartyVotes(item, req.user);
+  // ⬆️
 
   res.json({
     results: items,
@@ -274,15 +349,27 @@ async function list(req, res) {
 // =================================================================
 async function getOne(req, res) {
   const result = await models.Result.findById(req.params.id)
-    .populate('election', 'code title type status')
+    .populate('election', 'name type scope year status')
     .populate('pollingUnit', 'code name address')
+    .populate('party', 'name code abbreviation color')   // ⬅️ NEW
     .populate('submittedBy', 'firstName lastName role')
     .populate('verifiedBy', 'firstName lastName role');
 
   if (!result) throw ApiError.notFound('Result not found');
   assertCanAccess(req, result);
 
-  res.json({ result: result.toJSON() });
+  // ⬇️ NEW — party isolation + partyVotes sanitization
+  if (!CROSS_PARTY_ROLES.has(req.user.role)) {
+    const userParty = req.user.scope?.party;
+    if (!userParty || !result.party || result.party.toString() !== userParty.toString()) {
+      throw ApiError.forbidden('You do not have access to this result');
+    }
+  }
+
+  const payload = result.toJSON();
+  sanitizePartyVotes(payload, req.user);
+  res.json({ result: payload });
+  // ⬆️
 }
 
 // =================================================================
@@ -293,12 +380,20 @@ async function verify(req, res) {
   if (!result) throw ApiError.notFound('Result not found');
   assertCanAccess(req, result);
 
+  // ⬇️ NEW — party isolation
+  if (!CROSS_PARTY_ROLES.has(req.user.role)) {
+    const userParty = req.user.scope?.party;
+    if (!userParty || !result.party || result.party.toString() !== userParty.toString()) {
+      throw ApiError.forbidden('You cannot verify results for another party');
+    }
+  }
+  // ⬆️
+
   if (result.status !== 'SUBMITTED') {
     throw ApiError.badRequest(`Cannot verify a result in status ${result.status}`);
   }
   if (!result.isCurrent) throw ApiError.badRequest('Cannot verify a superseded result');
 
-  // Auto-correct math
   const partySum = result.partyVotes.reduce((sum, p) => sum + p.votes, 0);
   result.totalValidVotes = partySum;
   result.totalVotesCast = partySum + (result.rejectedBallots || 0);
@@ -318,7 +413,7 @@ async function verify(req, res) {
     action: 'RESULT_VERIFIED',
     entity: 'Result',
     entityId: result._id,
-    metadata: { election: result.election, puCode: result.puCode },
+    metadata: { election: result.election, party: result.party, puCode: result.puCode },
     req,
   });
 
@@ -334,7 +429,10 @@ async function verify(req, res) {
   });
 
   invalidateCollation(result, req.user._id, 'verify');
-  res.json({ result: result.toJSON() });
+
+  const payload = result.toJSON();
+  sanitizePartyVotes(payload, req.user);
+  res.json({ result: payload });
 }
 
 // =================================================================
@@ -344,6 +442,15 @@ async function flag(req, res) {
   const result = await models.Result.findById(req.params.id);
   if (!result) throw ApiError.notFound('Result not found');
   assertCanAccess(req, result);
+
+  // ⬇️ NEW — party isolation
+  if (!CROSS_PARTY_ROLES.has(req.user.role)) {
+    const userParty = req.user.scope?.party;
+    if (!userParty || !result.party || result.party.toString() !== userParty.toString()) {
+      throw ApiError.forbidden('You cannot flag results for another party');
+    }
+  }
+  // ⬆️
 
   if (!['SUBMITTED', 'VERIFIED'].includes(result.status)) {
     throw ApiError.badRequest(`Cannot flag a result in status ${result.status}`);
@@ -378,7 +485,10 @@ async function flag(req, res) {
   });
 
   invalidateCollation(result, req.user._id, 'flag');
-  res.json({ result: result.toJSON() });
+
+  const payload = result.toJSON();
+  sanitizePartyVotes(payload, req.user);
+  res.json({ result: payload });
 }
 
 // =================================================================
@@ -388,6 +498,15 @@ async function reject(req, res) {
   const result = await models.Result.findById(req.params.id);
   if (!result) throw ApiError.notFound('Result not found');
   assertCanAccess(req, result);
+
+  // ⬇️ NEW — party isolation
+  if (!CROSS_PARTY_ROLES.has(req.user.role)) {
+    const userParty = req.user.scope?.party;
+    if (!userParty || !result.party || result.party.toString() !== userParty.toString()) {
+      throw ApiError.forbidden('You cannot reject results for another party');
+    }
+  }
+  // ⬆️
 
   if (['REJECTED', 'SUPERSEDED'].includes(result.status)) {
     throw ApiError.badRequest(`Cannot reject a result in status ${result.status}`);
@@ -422,7 +541,10 @@ async function reject(req, res) {
   });
 
   invalidateCollation(result, req.user._id, 'reject');
-  res.json({ result: result.toJSON() });
+
+  const payload = result.toJSON();
+  sanitizePartyVotes(payload, req.user);
+  res.json({ result: payload });
 }
 
 module.exports = { submit, list, getOne, verify, flag, reject };
