@@ -20,14 +20,12 @@ class ErrorBoundary extends Component {
   render() {
     if (this.state.hasError) {
       return (
-        <div
-          style={{
-            padding: '20px',
-            color: 'red',
-            background: '#ffeeee',
-            minHeight: '100vh'
-          }}
-        >
+        <div style={{
+          padding: '20px',
+          color: 'red',
+          background: '#ffeeee',
+          minHeight: '100vh'
+        }}>
           <h1 style={{ fontSize: '24px', fontWeight: 'bold' }}>
             Page Crashed
           </h1>
@@ -36,15 +34,13 @@ class ErrorBoundary extends Component {
             {this.state.error?.toString()}
           </p>
 
-          <pre
-            style={{
-              marginTop: '20px',
-              padding: '10px',
-              background: 'white',
-              fontSize: '12px',
-              overflow: 'auto'
-            }}
-          >
+          <pre style={{
+            marginTop: '20px',
+            padding: '10px',
+            background: 'white',
+            fontSize: '12px',
+            overflow: 'auto'
+          }}>
             {this.state.error?.stack}
           </pre>
         </div>
@@ -64,25 +60,21 @@ const CREATABLE_ROLES = {
     'WARD_ADMIN',
     'POLLING_UNIT_AGENT'
   ],
-
   STATE_ADMIN: [
     'PARTY_ADMIN',
     'LGA_ADMIN',
     'WARD_ADMIN',
     'POLLING_UNIT_AGENT'
   ],
-
   PARTY_ADMIN: [
     'LGA_ADMIN',
     'WARD_ADMIN',
     'POLLING_UNIT_AGENT'
   ],
-
   LGA_ADMIN: [
     'WARD_ADMIN',
     'POLLING_UNIT_AGENT'
   ],
-
   WARD_ADMIN: [
     'POLLING_UNIT_AGENT'
   ]
@@ -122,14 +114,68 @@ const WARD_ROLES = [
   'POLLING_UNIT_AGENT'
 ];
 
+// NORMALIZE API RESPONSES
+function getArray(data, keys = []) {
+  if (Array.isArray(data)) return data;
+
+  if (!data || typeof data !== 'object') return [];
+
+  for (const key of keys) {
+    if (Array.isArray(data[key])) return data[key];
+  }
+
+  if (Array.isArray(data.data)) return data.data;
+
+  return [];
+}
+
+// FORMAT BACKEND ERRORS
+function getErrorMessage(err) {
+  const response = err.response?.data;
+
+  if (!response) {
+    return err.message || 'Network error. Please try again.';
+  }
+
+  const details = response.details || response.errors;
+
+  if (Array.isArray(details)) {
+    return details.map(item =>
+      typeof item === 'string'
+        ? item
+        : item.message || JSON.stringify(item)
+    ).join(', ');
+  }
+
+  if (details && typeof details === 'object') {
+    return Object.entries(details)
+      .map(([field, message]) =>
+        `${field}: ${
+          typeof message === 'string'
+            ? message
+            : JSON.stringify(message)
+        }`
+      )
+      .join(', ');
+  }
+
+  if (typeof response.message === 'string') {
+    return response.message;
+  }
+
+  if (typeof response.error === 'string') {
+    return response.error;
+  }
+
+  return JSON.stringify(response);
+}
+
 function UsersPageContent() {
   const { user } = useAuth();
 
   const allowedRoles = CREATABLE_ROLES[user?.role] || [];
 
-  const [role, setRole] = useState(
-    allowedRoles[0] || ''
-  );
+  const [role, setRole] = useState(allowedRoles[0] || '');
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -152,14 +198,8 @@ function UsersPageContent() {
     { initial: [] }
   );
 
-  // GUARANTEE PARTIES IS ALWAYS AN ARRAY
-  const safeParties = Array.isArray(partiesHook.data)
-    ? partiesHook.data
-    : Array.isArray(partiesHook.data?.parties)
-      ? partiesHook.data.parties
-      : Array.isArray(partiesHook.data?.data)
-        ? partiesHook.data.data
-        : [];
+  // ALWAYS RETURN AN ARRAY
+  const safeParties = getArray(partiesHook.data, ['parties']);
 
   // LOAD GEOGRAPHICAL DATA
   const statesApi = useApi(
@@ -192,38 +232,11 @@ function UsersPageContent() {
     { initial: [] }
   );
 
-  // NORMALIZE GEOGRAPHICAL API RESPONSES
-  const safeStates = Array.isArray(statesApi.data)
-    ? statesApi.data
-    : Array.isArray(statesApi.data?.states)
-      ? statesApi.data.states
-      : Array.isArray(statesApi.data?.data)
-        ? statesApi.data.data
-        : [];
-
-  const safeLgas = Array.isArray(lgasApi.data)
-    ? lgasApi.data
-    : Array.isArray(lgasApi.data?.lgas)
-      ? lgasApi.data.lgas
-      : Array.isArray(lgasApi.data?.data)
-        ? lgasApi.data.data
-        : [];
-
-  const safeWards = Array.isArray(wardsApi.data)
-    ? wardsApi.data
-    : Array.isArray(wardsApi.data?.wards)
-      ? wardsApi.data.wards
-      : Array.isArray(wardsApi.data?.data)
-        ? wardsApi.data.data
-        : [];
-
-  const safePus = Array.isArray(pusApi.data)
-    ? pusApi.data
-    : Array.isArray(pusApi.data?.pollingUnits)
-      ? pusApi.data.pollingUnits
-      : Array.isArray(pusApi.data?.data)
-        ? pusApi.data.data
-        : [];
+  // NORMALIZE GEOGRAPHICAL RESPONSES
+  const safeStates = getArray(statesApi.data, ['states']);
+  const safeLgas = getArray(lgasApi.data, ['lgas']);
+  const safeWards = getArray(wardsApi.data, ['wards']);
+  const safePus = getArray(pusApi.data, ['pollingUnits']);
 
   // SCOPE LOCKS
   const isPartyLocked =
@@ -240,52 +253,34 @@ function UsersPageContent() {
 
   // AUTO-SELECT PARTY
   useEffect(() => {
-    if (
-      isPartyLocked &&
-      user?.scope?.party &&
-      safeParties.length > 0
-    ) {
+    if (isPartyLocked && user?.scope?.party) {
       const party = safeParties.find(
         p => p._id === user.scope.party
       );
 
-      if (party) {
-        setPartyId(party._id);
-      }
+      if (party) setPartyId(party._id);
     }
   }, [isPartyLocked, user?.scope?.party, safeParties]);
 
   // AUTO-SELECT STATE
   useEffect(() => {
-    if (
-      isStateLocked &&
-      user?.scope?.state &&
-      safeStates.length > 0
-    ) {
+    if (isStateLocked && user?.scope?.state) {
       const state = safeStates.find(
         s => s._id === user.scope.state
       );
 
-      if (state) {
-        setStateCode(state.code);
-      }
+      if (state) setStateCode(state.code);
     }
   }, [isStateLocked, user?.scope?.state, safeStates]);
 
   // AUTO-SELECT LGA
   useEffect(() => {
-    if (
-      isLgaLocked &&
-      user?.scope?.lga &&
-      safeLgas.length > 0
-    ) {
+    if (isLgaLocked && user?.scope?.lga) {
       const lga = safeLgas.find(
         l => l._id === user.scope.lga
       );
 
-      if (lga) {
-        setLgaCode(lga.code);
-      }
+      if (lga) setLgaCode(lga.code);
     }
   }, [isLgaLocked, user?.scope?.lga, safeLgas]);
 
@@ -307,7 +302,7 @@ function UsersPageContent() {
     setPuId('');
   }, [wardCode]);
 
-  // RESET PARTY WHEN ROLE DOES NOT NEED IT
+  // RESET PARTY WHEN NOT REQUIRED
   useEffect(() => {
     if (!ROLE_NEEDS_PARTY.has(role) && !isPartyLocked) {
       setPartyId('');
@@ -317,6 +312,8 @@ function UsersPageContent() {
   // CREATE USER
   async function handleCreate(e) {
     e.preventDefault();
+
+    if (busy) return;
 
     setBusy(true);
 
@@ -388,19 +385,28 @@ function UsersPageContent() {
         scope.pollingUnit = puId;
       }
 
-      await usersApi.register({
-        email,
+      // EXACT REGISTRATION PAYLOAD
+      const payload = {
+        email: email.trim().toLowerCase(),
         password,
-        firstName,
-        lastName,
+        firstName: firstName.trim(),
+        lastName: lastName.trim(),
         role,
         scope
+      };
+
+      console.log('USER REGISTRATION PAYLOAD:', {
+        ...payload,
+        password: '[HIDDEN]'
       });
+
+      await usersApi.register(payload);
 
       toast.success(
         `${ROLE_LABELS[role]} created successfully`
       );
 
+      // RESET FORM
       setEmail('');
       setPassword('');
       setFirstName('');
@@ -418,11 +424,18 @@ function UsersPageContent() {
       setPuId('');
 
     } catch (err) {
-      toast.error(
-        err.response?.data?.error ||
-        err.message ||
-        'Failed to create user'
+      // SHOW THE REAL BACKEND ERROR
+      console.error(
+        'USER CREATION FAILED:',
+        err.response?.data || err
       );
+
+      const message = getErrorMessage(err);
+
+      toast.error(message, {
+        duration: 8000
+      });
+
     } finally {
       setBusy(false);
     }
@@ -554,7 +567,7 @@ function UsersPageContent() {
         </div>
 
         {/* USER INFORMATION */}
-        <div className="grid grid-cols-1 grid-cols-2 gap-4">
+        <div className="grid grid-cols-2 gap-4">
 
           <div>
             <label className="label">First Name</label>
@@ -607,7 +620,7 @@ function UsersPageContent() {
           Assign Scope
         </h2>
 
-        <div className="grid grid-cols-1 grid-cols-2 gap-4">
+        <div className="grid grid-cols-2 gap-4">
 
           {/* PARTY */}
           {needsParty && (
@@ -631,7 +644,7 @@ function UsersPageContent() {
 
                 {safeParties.map(p => (
                   <option key={p._id} value={p._id}>
-                    {p.abbreviation || p.code || ''} 
+                    {p.abbreviation || p.code || ''}
                     {p.abbreviation || p.code ? ' — ' : ''}
                     {p.name}
                   </option>
