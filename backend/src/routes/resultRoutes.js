@@ -34,7 +34,8 @@ router.get('/:id', asyncHandler(ctrl.getOne));
 // --- workflow (ward admin and above) ---
 router.patch(
   '/:id/verify',
-  requireRole(ROLES.WARD_ADMIN, ROLES.LGA_ADMIN, ROLES.STATE_ADMIN, ROLES.NATIONAL_SUPER_ADMIN),
+  requireRole(ROLES.WARD_ADMIN, ROLES.LGA_ADMIN,
+  ROLES.PARTY_ADMIN, ROLES.STATE_ADMIN, ROLES.NATIONAL_SUPER_ADMIN),
   validate(verifyResultSchema),
   asyncHandler(ctrl.verify)
 );
