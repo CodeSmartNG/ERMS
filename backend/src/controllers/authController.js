@@ -123,8 +123,12 @@ async function register(req, res) {
 
   // 3) Scope containment: creator can only delegate scope within their own.
   const creatorScope = req.user.scope || {};
-  const finalScope = { state: null, lga: null, ward: null, pollingUnit: null };
-  for (const field of ['state', 'lga', 'ward', 'pollingUnit']) {
+  
+  // ⬇️ FIXED — added party to initialized scope
+  const finalScope = { party: null, state: null, lga: null, ward: null, pollingUnit: null };
+  
+  // ⬇️ FIXED — added party to loop
+  for (const field of ['party', 'state', 'lga', 'ward', 'pollingUnit']) {
     if (creatorScope[field]) {
       // Creator is scoped — force the same value.
       if (scope?.[field] && !creatorScope[field].equals(scope[field])) {
@@ -135,6 +139,7 @@ async function register(req, res) {
       finalScope[field] = scope[field];
     }
   }
+  
   for (const field of required) {
     if (!finalScope[field]) {
       throw ApiError.forbidden(`Cannot create ${role}: missing ${field} after scope containment`);
@@ -159,7 +164,7 @@ async function register(req, res) {
     action: 'USER_CREATED',
     entity: 'User',
     entityId: user._id,
-    metadata: { role, email: user.email },
+    metadata: { role, email: user.email, party: finalScope.party }, // Added party to audit log
     req,
   });
 
