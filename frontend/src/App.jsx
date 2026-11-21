@@ -26,7 +26,7 @@ import AdminDashboard from './pages/admin/AdminDashboard';
 import DashboardState from './pages/admin/DashboardState';
 import DashboardLGA from './pages/admin/DashboardLGA';
 import DashboardWard from './pages/admin/DashboardWard';
-import DashboardParty from './pages/admin/DashboardParty';
+
 
 import ResultsReviewPage from './pages/admin/ResultsReviewPage';
 import IncidentsPage from './pages/admin/IncidentsPage';
@@ -190,11 +190,7 @@ export default function App() {
               element={<AdminDashboard />}
             />
 
-            {/* Party Admin dashboard - temporary */}
-            <Route
-  path="/admin/dashboard/party"
-  element={<DashboardParty />}
-/>
+            
 
             {/* Geographic drill-down dashboards */}
             <Route
