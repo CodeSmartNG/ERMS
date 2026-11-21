@@ -15,10 +15,9 @@ const resultSchema = new mongoose.Schema(
   {
     // ---- Identity ----
     election:    { type: mongoose.Schema.Types.ObjectId, ref: 'Election',    required: true, index: true },
-    party:       { type: mongoose.Schema.Types.ObjectId, ref: 'Party',       required: true, index: true },  // ⬅️ NEW
     pollingUnit: { type: mongoose.Schema.Types.ObjectId, ref: 'PollingUnit', required: true, index: true },
 
-    // ---- Denormalized geo (from PollingUnit.path) — enables fast aggregation ----
+    // ---- Denormalized geo ----
     state: { type: mongoose.Schema.Types.ObjectId, ref: 'State', required: true, index: true },
     lga:   { type: mongoose.Schema.Types.ObjectId, ref: 'LGA',   required: true, index: true },
     ward:  { type: mongoose.Schema.Types.ObjectId, ref: 'Ward',  required: true, index: true },
@@ -83,20 +82,20 @@ const resultSchema = new mongoose.Schema(
   { timestamps: true, versionKey: false }
 );
 
-// One current result per (election, party, PU)
+// One current result per (election, PU).
 resultSchema.index(
-  { election: 1, party: 1, pollingUnit: 1, isCurrent: 1 },
+  { election: 1, pollingUnit: 1, isCurrent: 1 },
   { unique: true, partialFilterExpression: { isCurrent: true } }
 );
 
-// Idempotency: (election, party, key) unique
-resultSchema.index({ election: 1, party: 1, idempotencyKey: 1 }, { unique: true });
+// Idempotency: (election, key) unique — resubmission returns same doc.
+resultSchema.index({ election: 1, idempotencyKey: 1 }, { unique: true });
 
-// Dashboard hot paths — party-scoped
-resultSchema.index({ election: 1, party: 1, status: 1, 'path.0': 1 });
-resultSchema.index({ election: 1, party: 1, status: 1, 'path.1': 1 });
-resultSchema.index({ election: 1, party: 1, status: 1, 'path.2': 1 });
-resultSchema.index({ election: 1, party: 1, submittedAt: -1 });
+// Dashboard hot paths
+resultSchema.index({ election: 1, status: 1, 'path.0': 1 }); // state roll-up
+resultSchema.index({ election: 1, status: 1, 'path.1': 1 }); // LGA roll-up
+resultSchema.index({ election: 1, status: 1, 'path.2': 1 }); // ward roll-up
+resultSchema.index({ election: 1, submittedAt: -1 });
 
 // ---- Validation ----
 resultSchema.pre('validate', function (next) {
