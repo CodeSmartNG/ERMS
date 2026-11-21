@@ -13,21 +13,6 @@ const partySchema = new mongoose.Schema(
     isActive:       { type: Boolean, default: true, index: true },
     registeredAt:   { type: Date, default: null },
     deregisteredAt: { type: Date, default: null },
-
-    // ⬇️ NEW — for multi-tenant + audit
-    createdBy: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'User',
-      default: null,
-      // null = legacy/seeded party, non-null = created via UI
-    },
-
-    // Optional: if a party is only active in specific states
-    // (e.g., a regional party like APGA in Anambra only)
-    activeStates: [{
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'State',
-    }],
   },
   { timestamps: true, versionKey: false }
 );
