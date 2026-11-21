@@ -1,4 +1,3 @@
-
 import {
   Routes,
   Route,
@@ -27,7 +26,6 @@ import DashboardState from './pages/admin/DashboardState';
 import DashboardLGA from './pages/admin/DashboardLGA';
 import DashboardWard from './pages/admin/DashboardWard';
 
-
 import ResultsReviewPage from './pages/admin/ResultsReviewPage';
 import IncidentsPage from './pages/admin/IncidentsPage';
 import ElectionsPage from './pages/admin/ElectionsPage';
@@ -45,14 +43,11 @@ import NotFoundPage from './pages/NotFoundPage';
 |--------------------------------------------------------------------------
 | ADMIN ROLES
 |--------------------------------------------------------------------------
-| PARTY_ADMIN has now been added.
-| POLLING_UNIT_AGENT uses the separate agent area.
 */
 
 const ADMIN_ROLES = [
   ROLES.NATIONAL_SUPER_ADMIN,
   ROLES.STATE_ADMIN,
-  ROLES.PARTY_ADMIN,
   ROLES.LGA_ADMIN,
   ROLES.WARD_ADMIN,
   ROLES.OBSERVER,
@@ -177,7 +172,7 @@ export default function App() {
 
         {/* -------------------------------------------------
             ADMIN AREA
-            NATIONAL, STATE, PARTY, LGA, WARD, OBSERVER
+            NATIONAL, STATE, LGA, WARD, OBSERVER
         ------------------------------------------------- */}
 
         <Route element={<RequireAuth roles={ADMIN_ROLES} />}>
@@ -189,8 +184,6 @@ export default function App() {
               path="/admin/dashboard"
               element={<AdminDashboard />}
             />
-
-            
 
             {/* Geographic drill-down dashboards */}
             <Route
