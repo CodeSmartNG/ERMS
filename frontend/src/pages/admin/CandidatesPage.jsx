@@ -1,18 +1,20 @@
 import { useState } from 'react';
-import { Plus, Users } from 'lucide-react';
+import { Users } from 'lucide-react';
 import { toast } from 'sonner';
 import { useApi } from '@/hooks/useApi';
 import { electionsApi, partiesApi, candidatesApi } from '@/services/api';
 
 export default function CandidatesPage() {
-  // Safely access data with a fallback to empty arrays
   const electionsApiRes = useApi(() => electionsApi.list().then(r => r.data.elections || []), [], { initial: [] });
   const partiesApiRes = useApi(() => partiesApi.list().then(r => r.data.parties || []), [], { initial: [] });
   
   const [electionId, setElectionId] = useState('');
   const [partyId, setPartyId] = useState('');
-  const [firstName, setFirstName] = useState('');
-  const [lastName, setLastName] = useState('');
+  
+  // ⬇️ CHANGED to a single `name` field to match backend
+  const [name, setName] = useState('');
+  // ⬇️ ADDED position field
+  const [position, setPosition] = useState('PRESIDENT'); 
   const [busy, setBusy] = useState(false);
 
   const candidatesApiRes = useApi(
@@ -25,10 +27,15 @@ export default function CandidatesPage() {
     e.preventDefault();
     setBusy(true);
     try {
-      await candidatesApi.create({ election: electionId, party: partyId, firstName, lastName });
+      // ⬇️ Send `name` and `position` instead of `firstName`/`lastName`
+      await candidatesApi.create({ 
+        election: electionId, 
+        party: partyId, 
+        name, 
+        position 
+      });
       toast.success('Candidate added successfully');
-      setFirstName(''); 
-      setLastName('');
+      setName(''); 
       setPartyId('');
       candidatesApiRes.refetch();
     } catch (err) {
@@ -66,14 +73,21 @@ export default function CandidatesPage() {
                   ))}
                 </select>
               </div>
-              <div className="hidden sm:block"></div>
+              
               <div>
-                <label className="label">First Name</label>
-                <input required className="input" value={firstName} onChange={e => setFirstName(e.target.value)} placeholder="e.g. Bola" />
+                <label className="label">Position</label>
+                <select required className="input" value={position} onChange={e => setPosition(e.target.value)}>
+                  <option value="PRESIDENT">President</option>
+                  <option value="GOVERNOR">Governor</option>
+                  <option value="SENATOR">Senator</option>
+                  <option value="HOUSE_OF_REPS">House of Reps</option>
+                  <option value="STATE_ASSEMBLY">State Assembly</option>
+                </select>
               </div>
-              <div>
-                <label className="label">Last Name</label>
-                <input required className="input" value={lastName} onChange={e => setLastName(e.target.value)} placeholder="e.g. Tinubu" />
+
+              <div className="sm:col-span-2">
+                <label className="label">Candidate Name</label>
+                <input required className="input" value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Bola Ahmed Tinubu" />
               </div>
             </div>
             <button type="submit" disabled={busy || !partyId} className="btn-primary">
@@ -93,6 +107,7 @@ export default function CandidatesPage() {
                 <thead className="bg-slate-50 text-xs uppercase text-slate-500">
                   <tr>
                     <th className="px-4 py-3 text-left font-medium">Candidate</th>
+                    <th className="px-4 py-3 text-left font-medium">Position</th>
                     <th className="px-4 py-3 text-left font-medium">Party</th>
                   </tr>
                 </thead>
@@ -101,10 +116,13 @@ export default function CandidatesPage() {
                     <tr key={c._id}>
                       <td className="px-4 py-3 font-medium text-slate-900 flex items-center gap-2">
                         <Users className="h-4 w-4 text-slate-400" />
-                        {c.firstName} {c.lastName}
+                        {c.name}
                       </td>
                       <td className="px-4 py-3 text-slate-600">
-                        <span className="font-semibold">{c.party?.code || 'N/A'}</span> ({c.party?.name || 'Unknown'})
+                        {c.position}
+                      </td>
+                      <td className="px-4 py-3 text-slate-600">
+                        <span className="font-semibold">{c.party?.code || 'N/A'}</span>
                       </td>
                     </tr>
                   ))}
