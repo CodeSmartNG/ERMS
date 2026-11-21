@@ -95,7 +95,7 @@ export const resultsApi = {
 
 export const incidentsApi = {
   list: (params) => api.get('/incidents', { params }),
-  mapData: (params) => api.get('/incidents/map-data', { params }), // <--- ADDED FOR HEATMAP
+  mapData: (params) => api.get('/incidents/map-data', { params }),
   get: (id) => api.get(`/incidents/${id}`),
   assign: (id, assignedTo) => api.patch(`/incidents/${id}/assign`, { assignedTo }),
   updateStatus: (id, status, notes) => api.patch(`/incidents/${id}/status`, { status, notes }),
@@ -117,9 +117,10 @@ export const electionsApi = {
   updateStatus: (id, status) => api.patch(`/elections/${id}/status`, { status }),
 };
 
+// ⬇️ FIXED — Unwrapping the array so CandidatesPage can read it
 export const partiesApi = {
-  list: () => api.get('/parties'),
-  create: (data) => api.post('/parties', data),
+  list: () => api.get('/parties').then(r => r.data),
+  create: (data) => api.post('/parties', data).then(r => r.data),
 };
 
 export const usersApi = {
