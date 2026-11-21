@@ -44,9 +44,14 @@ async function submit(req, res) {
   if (election.status !== 'ACTIVE') {
     throw ApiError.badRequest(`Election is ${election.status}; submissions only open when ACTIVE`);
   }
-  if (election.states.length > 0 && !election.states.some((s) => s.equals(geo.state))) {
-    throw ApiError.badRequest('Election is not active in this state');
+
+  // ⬇️ FIXED — Check if `states` exists before reading `.length`
+  if (election.states && election.states.length > 0) {
+    if (!election.states.some((s) => s.equals(geo.state))) {
+      throw ApiError.badRequest('Election is not active in this state');
+    }
   }
+  // ⬆️
 
   const existing = await models.Result.findOne({
     election: body.election,
@@ -196,6 +201,9 @@ async function submit(req, res) {
     req,
   });
 
+  // ⬇️ FIXED — Ensure election.code exists before using it
+  const electionCode = election.code || election.title || 'Unknown Election';
+
   const wardAdmin = await models.User.findOne({
     role: ROLES.WARD_ADMIN,
     'scope.ward': geo.ward,
@@ -209,12 +217,13 @@ async function submit(req, res) {
       recipient: wardAdmin._id,
       type: 'RESULT_SUBMITTED',
       title: 'New result submitted',
-      body: `PU ${geo.puCode} submitted a result for election ${election.code}`,
+      body: `PU ${geo.puCode} submitted a result for election ${electionCode}`,
       link: `/results/${resultDoc._id}`,
       refModel: 'Result',
       refId: resultDoc._id,
     });
   }
+  // ⬆️
 
   invalidateCollation(resultDoc, user._id, 'submit');
   res.status(201).json({ result: resultDoc.toJSON() });
