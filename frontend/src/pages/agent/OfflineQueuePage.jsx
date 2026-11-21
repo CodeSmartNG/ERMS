@@ -39,9 +39,8 @@ export default function OfflineQueuePage() {
 
   async function onFlush() {
     setRefreshing(true);
-    try {
-  await flushQueue({ retryFailed: true });
-} finally {
+    try { await flushQueue(); } finally { await refresh(); setRefreshing(false); }
+  }
 
   async function onDelete(localId) {
     if (!confirm('Delete this queued submission? It will not be sent.')) return;
