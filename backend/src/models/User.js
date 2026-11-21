@@ -5,9 +5,6 @@ const { ROLES, requiredScopeFields } = require('../utils/roleScope');
 
 const scopeSchema = new mongoose.Schema(
   {
-    // ⬇️ NEW — party scope (null for SUPER_ADMIN, STATE_ADMIN, OBSERVER)
-    party:       { type: mongoose.Schema.Types.ObjectId, ref: 'Party',        default: null, index: true },
-
     state:       { type: mongoose.Schema.Types.ObjectId, ref: 'State',        default: null },
     lga:         { type: mongoose.Schema.Types.ObjectId, ref: 'LGA',          default: null },
     ward:        { type: mongoose.Schema.Types.ObjectId, ref: 'Ward',         default: null },
@@ -27,16 +24,6 @@ const userSchema = new mongoose.Schema(
     role: { type: String, enum: Object.values(ROLES), required: true, index: true },
     scope: { type: scopeSchema, required: true, default: () => ({}) },
 
-    // ⬇️ NEW — which election is this user currently viewing?
-    // Lets a PARTY_ADMIN with multiple elections switch context without re-login.
-    // null = see all elections in their scope.
-    activeElection: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'Election',
-      default: null,
-      index: true,
-    },
-
     isActive: { type: Boolean, default: true, index: true },
 
     twoFactorEnabled: { type: Boolean, default: false },
@@ -55,7 +42,6 @@ const userSchema = new mongoose.Schema(
 
 // Indexes for scoped listings
 userSchema.index({ role: 1, 'scope.state': 1 });
-userSchema.index({ 'scope.party': 1, 'scope.state': 1 });   // ⬅️ NEW — party+state lookups
 userSchema.index({ 'scope.lga': 1 });
 userSchema.index({ 'scope.ward': 1 });
 userSchema.index({ 'scope.pollingUnit': 1 });
