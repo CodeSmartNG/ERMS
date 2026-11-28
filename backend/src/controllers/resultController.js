@@ -151,7 +151,9 @@ async function submit(req, res) {
           photoPublicId: uploaded.photoPublicId,
           photoHash: uploaded.photoHash,
           capturedAt: body.capturedAt ? new Date(body.capturedAt) : new Date(),
-          gps: body.gps,
+          // ⬇️ FIXED — Parse the GPS string back into an object
+          gps: body.gps ? (typeof body.gps === 'string' ? JSON.parse(body.gps) : body.gps) : undefined,
+          // ⬆️
           deviceId: body.deviceId || null,
         },
 
