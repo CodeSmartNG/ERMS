@@ -7,6 +7,29 @@ import { enqueue } from '@/services/offlineQueue';
 import { flushQueue } from '@/services/syncService';
 import { useAuth } from '@/context/AuthContext';
 
+// ⬇️ NEW: Helper to capture GPS safely
+function getGpsLocation() {
+  return new Promise((resolve) => {
+    if (!navigator.geolocation) {
+      return resolve(null);
+    }
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        resolve({
+          lat: position.coords.latitude,
+          lng: position.coords.longitude,
+          accuracyM: position.coords.accuracy,
+        });
+      },
+      (error) => {
+        console.warn('GPS Error:', error.message);
+        resolve(null); // Never block submission on GPS error
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+    );
+  });
+}
+
 export default function SubmitResultPage() {
   const navigate = useNavigate();
   const { user } = useAuth();
@@ -68,6 +91,9 @@ export default function SubmitResultPage() {
     if (!valid || submitting) return;
     setSubmitting(true);
 
+    // ⬇️ NEW: Capture GPS safely before building payload
+    const gpsData = await getGpsLocation();
+
     const payload = {
       election: electionId,
       pollingUnit: user?.scope?.pollingUnit,
@@ -79,13 +105,15 @@ export default function SubmitResultPage() {
       idempotencyKey: crypto.randomUUID(),
       capturedAt: new Date().toISOString(),
       notes: notes || undefined,
+      gps: gpsData ? JSON.stringify(gpsData) : undefined, // ⬅️ NEW: Add GPS to payload
     };
 
     try {
       const record = await enqueue({
         kind: 'result',
+        // ⬇️ We keep the stringified partyVotes and gps in the payload
         payload: { ...payload, partyVotes: JSON.stringify(payload.partyVotes) },
-        evidenceFiles: [{ blob: photo.blob, name: photo.name }], // <-- CHANGED to array
+        evidenceFiles: [{ blob: photo.blob, name: photo.name }],
       });
       
       // Always flush - the sync service will handle offline gracefully
